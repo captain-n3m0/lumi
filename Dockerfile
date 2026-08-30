@@ -7,17 +7,18 @@
 FROM node:22-alpine AS builder
 WORKDIR /app
 
-# Ensure dev dependencies and executables (Vite, Nitro, TypeScript) are fully available in build stage
-ENV NODE_ENV=development
+# Ensure Nitro targets Node.js standalone HTTP server
 ENV PATH=/app/node_modules/.bin:$PATH
 ENV NITRO_PRESET=node-server
 
 COPY package.json package-lock.json* ./
+# Install all dependencies including devDependencies needed for building
 RUN npm install --include=dev --legacy-peer-deps
 
 COPY . .
 
-# Build production bundles
+# Build production bundles with NODE_ENV=production
+ENV NODE_ENV=production
 RUN npm run build
 
 # Stage 2: Production Minimal Runtime (<150MB total image size)
