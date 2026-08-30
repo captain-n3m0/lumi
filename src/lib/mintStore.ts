@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useSyncExternalStore, useState, useEffect } from "react";
 import type { MintStage } from "./queue/types";
 
 export interface ScheduledMint {
@@ -147,6 +147,12 @@ function getServerSnapshot(): ScheduledMint[] {
 }
 
 export function useScheduledMints(): [ScheduledMint[], (id: string) => void] {
+  const [mounted, setMounted] = useState(false);
   const mints = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
-  return [mints, cancelScheduledMint];
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  return [mounted ? mints : emptyMints, cancelScheduledMint];
 }

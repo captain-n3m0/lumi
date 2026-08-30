@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import type { OpenSeaCollection } from "@/lib/opensea";
 import { searchCollectionsUnified } from "@/lib/collectionSearch";
-import { useWeb3Wallet } from "@/lib/useWeb3Wallet";
+import { useWallet } from "@/hooks/useWallet";
 import { useTheme } from "@/lib/theme";
 import { useManagedWallets } from "@/lib/walletStore";
 import { useScheduledMints } from "@/lib/mintStore";
@@ -106,7 +106,7 @@ export function LumiLayout({ children }: { children: ReactNode }) {
   const [calcEthPrice, setCalcEthPrice] = useState("3180");
   const [copiedAddr, setCopiedAddr] = useState(false);
   const { isDark, toggleTheme } = useTheme();
-  const wallet = useWeb3Wallet();
+  const wallet = useWallet();
   const { wallets } = useManagedWallets();
   const [scheduledMints] = useScheduledMints();
 
@@ -241,9 +241,12 @@ export function LumiLayout({ children }: { children: ReactNode }) {
                     <Copy className="size-3 opacity-60" />
                   )}
                 </button>
+                <span className="hidden sm:inline text-[11px] font-medium text-muted-foreground border-l border-primary/20 pl-1.5 ml-0.5">
+                  {wallet.balanceFormatted} {wallet.balance.symbol}
+                </span>
                 <button
                   type="button"
-                  onClick={wallet.disconnectWallet}
+                  onClick={() => wallet.disconnect()}
                   aria-label="Disconnect wallet"
                   className="text-muted-foreground hover:text-destructive transition ml-1 p-0.5 rounded cursor-pointer"
                   title="Disconnect"
@@ -254,16 +257,22 @@ export function LumiLayout({ children }: { children: ReactNode }) {
             ) : (
               <button
                 type="button"
-                onClick={wallet.connectWallet}
-                disabled={wallet.isConnecting}
+                onClick={() => wallet.connect()}
+                disabled={wallet.isConnecting || wallet.isReconnecting}
                 className="flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-purple-600 to-indigo-600 px-3 py-1.5 text-xs font-bold text-white shadow-xs transition hover:brightness-110 active:scale-98 cursor-pointer"
               >
-                {wallet.isConnecting ? (
+                {wallet.isConnecting || wallet.isReconnecting ? (
                   <Loader2 className="size-3.5 animate-spin" />
                 ) : (
                   <WalletIcon walletType="metamask" className="size-3.5" />
                 )}
-                <span>{wallet.isConnecting ? "Connecting..." : "Connect"}</span>
+                <span>
+                  {wallet.isReconnecting
+                    ? "Restoring..."
+                    : wallet.isConnecting
+                      ? "Connecting..."
+                      : "Connect"}
+                </span>
               </button>
             )}
           </div>

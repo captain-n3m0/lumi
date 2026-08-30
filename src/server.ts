@@ -305,21 +305,114 @@ export default {
     // ==========================================
     // Server-Side Proxy: OpenSea & Multi-Chain API
     // ==========================================
-    if (url.pathname.startsWith("/api/opensea/search")) {
+    if (url.pathname.startsWith("/api/opensea")) {
       const q = url.searchParams.get("q") || "";
+      const slug = url.searchParams.get("slug") || "";
+      const address = url.searchParams.get("address") || "";
       const chain = url.searchParams.get("chain") || "ethereum";
       const apiKey = process.env.OPENSEA_API_KEY || "";
 
-      try {
-        const headers: Record<string, string> = {
-          Accept: "application/json",
-        };
-        if (apiKey) {
-          headers["x-api-key"] = apiKey;
-        }
+      const headers: Record<string, string> = {
+        Accept: "application/json",
+      };
+      if (apiKey) {
+        headers["x-api-key"] = apiKey;
+      }
 
+      // 1. Direct fetch by slug if provided or extracted
+      const targetSlug =
+        slug || (q && !q.startsWith("0x") && !q.includes(" ") ? q.toLowerCase() : "");
+
+      if (targetSlug) {
+        try {
+          const singleRes = await fetch(
+            `https://api.opensea.io/api/v2/collections/${encodeURIComponent(targetSlug)}`,
+            { headers },
+          );
+          if (singleRes.ok) {
+            const data = (await singleRes.json()) as {
+              collection?: string;
+              name?: string;
+              description?: string;
+              image_url?: string;
+              banner_image_url?: string;
+              total_supply?: number;
+              opensea_url?: string;
+              contracts?: Array<{ address: string; chain: string }>;
+            };
+
+            const contractAddr =
+              data.contracts?.[0]?.address || "0x0000000000000000000000000000000000000000";
+            const item = {
+              collection: data.collection || targetSlug,
+              name: data.name || targetSlug,
+              contractAddress: contractAddr,
+              chain: data.contracts?.[0]?.chain || chain,
+              itemCount: data.total_supply || 0,
+              slug: data.collection || targetSlug,
+              imageUrl: data.image_url || data.banner_image_url,
+              openseaUrl:
+                data.opensea_url ||
+                `https://opensea.io/collection/${data.collection || targetSlug}`,
+              description: data.description,
+              verified: true,
+              isRealApi: true,
+            };
+            return jsonResponse({ collections: [item], collection: item }, 200, 60);
+          }
+        } catch (err: unknown) {
+          console.warn("OpenSea slug fetch failed:", err);
+        }
+      }
+
+      // 2. Fetch by contract address
+      const targetAddress = address || (q.startsWith("0x") && q.length === 42 ? q : "");
+      if (targetAddress) {
+        try {
+          const contractRes = await fetch(
+            `https://api.opensea.io/api/v2/chain/${encodeURIComponent(chain)}/contract/${encodeURIComponent(targetAddress)}`,
+            { headers },
+          );
+          if (contractRes.ok) {
+            const data = (await contractRes.json()) as {
+              address: string;
+              chain: string;
+              collection?: string;
+              name?: string;
+            };
+            if (data.collection) {
+              // Fetch full collection details for this contract
+              const colRes = await fetch(
+                `https://api.opensea.io/api/v2/collections/${encodeURIComponent(data.collection)}`,
+                { headers },
+              );
+              if (colRes.ok) {
+                const colData = await colRes.json();
+                const item = {
+                  collection: colData.collection || data.collection,
+                  name: colData.name || data.name || "NFT Collection",
+                  contractAddress: targetAddress,
+                  chain: data.chain || chain,
+                  itemCount: colData.total_supply || 0,
+                  slug: colData.collection || data.collection,
+                  imageUrl: colData.image_url || colData.banner_image_url,
+                  openseaUrl:
+                    colData.opensea_url || `https://opensea.io/collection/${data.collection}`,
+                  isRealApi: true,
+                };
+                return jsonResponse({ collections: [item], collection: item }, 200, 60);
+              }
+            }
+          }
+        } catch (err: unknown) {
+          console.warn("OpenSea contract fetch failed:", err);
+        }
+      }
+
+      // 3. Fallback paginated search
+      try {
         const openseaRes = await fetch(
-          `https://api.opensea.io/api/v2/collections?chain=${encodeURIComponent(chain)}&limit=25`,
+          `https://api.opensea.io/api/v2/collections?chain=${encodeURIComponent(chain)}&limit=50`,
           { headers },
         );
 
@@ -327,6 +420,7 @@ export default {
           const data = (await openseaRes.json()) as OpenSeaApiResponse;
           const collections = (data.collections || [])
             .filter((c: OpenSeaCollectionRaw) => {
+              if (!q) return true;
               const name = (c.name || c.collection || "").toLowerCase();
               return (
                 name.includes(q.toLowerCase()) ||
@@ -343,13 +437,13 @@ export default {
               slug: item.collection,
               imageUrl: item.image_url,
               openseaUrl: item.opensea_url || `https://opensea.io/collection/${item.collection}`,
+              isRealApi: true,
             }));
 
           return jsonResponse({ collections }, 200, 60);
         }
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : "OpenSea fetch failed";
-        console.warn("OpenSea proxy fetch error:", message);
+        console.warn("OpenSea search fallback failed:", err);
       }
 
       return jsonResponse({ collections: [] }, 200);

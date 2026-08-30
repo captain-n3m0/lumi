@@ -173,63 +173,20 @@ export async function searchCollectionsUnified(
 
   const parsed = parseCollectionUrlOrQuery(trimmed);
   const results: OpenSeaCollection[] = [];
-
-  // Special match for evolastion
-  if (
-    trimmed.toLowerCase().includes("evolastion") ||
-    parsed.slug?.toLowerCase().includes("evolastion")
-  ) {
-    return [
-      {
-        collection: "evolastion",
-        name: "EVOLASTION",
-        contractAddress: "0xABBC4159077b31D8aB4E4700dE40e69EbA3550CA",
-        chain: "ethereum",
-        itemCount: 10000,
-        slug: "evolastion",
-        imageUrl:
-          "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=500&auto=format&fit=crop&q=80",
-        openseaUrl: "https://opensea.io/collection/evolastion",
-        verified: true,
-      },
-    ];
-  }
-
-  // 1. Direct On-Chain Contract Address Inspection
-  const effectiveAddress =
-    parsed.contractAddress || (/^0x[a-fA-F0-9]{40}$/i.test(trimmed) ? trimmed : undefined);
-  if (effectiveAddress) {
-    try {
-      const onChain = await queryOnChainContract(effectiveAddress, chainId);
-      if (onChain.isContract) {
-        const chainConfig = SUPPORTED_CHAINS[chainId] || SUPPORTED_CHAINS[1]!;
-        results.push({
-          collection: effectiveAddress.toLowerCase(),
-          name: onChain.name
-            ? `${onChain.name} (${onChain.symbol || onChain.standard})`
-            : `Contract ${effectiveAddress.slice(0, 6)}...${effectiveAddress.slice(-4)}`,
-          contractAddress: effectiveAddress,
-          chain: chainConfig.name.toLowerCase(),
-          itemCount: onChain.totalSupply ? Number(onChain.totalSupply) : 10000,
-          slug: effectiveAddress.toLowerCase(),
-          imageUrl: undefined,
-          openseaUrl: `https://opensea.io/assets/${chainConfig.name.toLowerCase()}/${effectiveAddress}`,
-        });
-      }
-    } catch {
-      // Fall through to other sources
-    }
-  }
-
   const searchTerm = parsed.slug || trimmed;
 
-  // 2. OpenSea Search (via server API proxy or direct)
+  // 1. Direct fetch from OpenSea API (via server proxy with OPENSEA_API_KEY)
   try {
-    const qLower = encodeURIComponent(searchTerm);
-    const res = await fetch(`/api/opensea/search?q=${qLower}&chain=ethereum`);
+    const searchParam = parsed.slug
+      ? `slug=${encodeURIComponent(parsed.slug)}`
+      : parsed.contractAddress
+        ? `address=${encodeURIComponent(parsed.contractAddress)}`
+        : `q=${encodeURIComponent(searchTerm)}`;
+
+    const res = await fetch(`/api/opensea?${searchParam}&chain=ethereum`);
     if (res.ok) {
       const data = await res.json();
-      if (Array.isArray(data.collections)) {
+      if (Array.isArray(data.collections) && data.collections.length > 0) {
         for (const c of data.collections) {
           if (
             !results.some(
@@ -241,8 +198,38 @@ export async function searchCollectionsUnified(
         }
       }
     }
-  } catch {
-    // API route may be unreachable in dev client mode, continue
+  } catch (err) {
+    console.warn("OpenSea API proxy fetch error:", err);
+  }
+
+  // 2. Direct On-Chain Contract Address Inspection
+  const effectiveAddress =
+    parsed.contractAddress || (/^0x[a-fA-F0-9]{40}$/i.test(trimmed) ? trimmed : undefined);
+  if (effectiveAddress) {
+    try {
+      const onChain = await queryOnChainContract(effectiveAddress, chainId);
+      if (onChain.isContract) {
+        const chainConfig = SUPPORTED_CHAINS[chainId] || SUPPORTED_CHAINS[1]!;
+        if (
+          !results.some((r) => r.contractAddress.toLowerCase() === effectiveAddress.toLowerCase())
+        ) {
+          results.push({
+            collection: effectiveAddress.toLowerCase(),
+            name: onChain.name
+              ? `${onChain.name} (${onChain.symbol || onChain.standard})`
+              : `Contract ${effectiveAddress.slice(0, 6)}...${effectiveAddress.slice(-4)}`,
+            contractAddress: effectiveAddress,
+            chain: chainConfig.name.toLowerCase(),
+            itemCount: onChain.totalSupply ? Number(onChain.totalSupply) : 10000,
+            slug: effectiveAddress.toLowerCase(),
+            imageUrl: undefined,
+            openseaUrl: `https://opensea.io/assets/${chainConfig.name.toLowerCase()}/${effectiveAddress}`,
+          });
+        }
+      }
+    } catch {
+      // Fall through to other sources
+    }
   }
 
   // 3. Match against known index
