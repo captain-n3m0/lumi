@@ -34,8 +34,6 @@ RUN addgroup --system --gid 1001 nodejs && \
 COPY --from=builder --chown=lumiuser:nodejs /app/package.json ./package.json
 COPY --from=builder --chown=lumiuser:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=lumiuser:nodejs /app/.output ./.output
-COPY --from=builder --chown=lumiuser:nodejs /app/dist ./dist
-COPY --from=builder --chown=lumiuser:nodejs /app/src ./src
 
 # Expose production port
 EXPOSE 3000

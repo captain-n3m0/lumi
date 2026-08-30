@@ -25,8 +25,8 @@ newgrp docker
 
 ### 3. Clone Repository & Configure Environment
 ```bash
-git clone <your-repo-url> umi-sniper
-cd umi-sniper
+git clone <your-repo-url> lumi-sniper
+cd lumi-sniper
 
 # Copy environment template
 cp .env.example .env
@@ -36,12 +36,12 @@ nano .env
 
 ### 4. Build and Run via Docker Compose
 ```bash
-docker compose up -d --build
+sudo docker compose up -d --build
 ```
 
 ### 5. Check Service Logs & Health
 ```bash
-docker compose logs -f app
+sudo docker compose logs -f app
 ```
 
 ---
@@ -51,9 +51,9 @@ docker compose logs -f app
 1. **Push Image to AWS ECR**:
 ```bash
 aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <YOUR_AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com
-docker build -t umi-sniper .
-docker tag umi-sniper:latest <YOUR_AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/umi-sniper:latest
-docker push <YOUR_AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/umi-sniper:latest
+docker build -t lumi-sniper .
+docker tag lumi-sniper:latest <YOUR_AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/lumi-sniper:latest
+docker push <YOUR_AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/lumi-sniper:latest
 ```
 
 2. **ECS Task Definition**:
