@@ -11,7 +11,7 @@ WORKDIR /app
 RUN apk add --no-cache python3 make g++
 
 COPY package.json package-lock.json* ./
-RUN npm ci
+RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
 COPY . .
 
@@ -28,19 +28,19 @@ ENV HOST=0.0.0.0
 
 # Create a non-root system user for enterprise security & compliance
 RUN addgroup --system --gid 1001 nodejs && \
-    adduser --system --uid 1001 umiuser
+    adduser --system --uid 1001 lumiuser
 
 # Copy built application and node_modules
-COPY --from=builder --chown=umiuser:nodejs /app/package.json ./package.json
-COPY --from=builder --chown=umiuser:nodejs /app/node_modules ./node_modules
-COPY --from=builder --chown=umiuser:nodejs /app/.output ./.output
-COPY --from=builder --chown=umiuser:nodejs /app/dist ./dist
-COPY --from=builder --chown=umiuser:nodejs /app/src ./src
+COPY --from=builder --chown=lumiuser:nodejs /app/package.json ./package.json
+COPY --from=builder --chown=lumiuser:nodejs /app/node_modules ./node_modules
+COPY --from=builder --chown=lumiuser:nodejs /app/.output ./.output
+COPY --from=builder --chown=lumiuser:nodejs /app/dist ./dist
+COPY --from=builder --chown=lumiuser:nodejs /app/src ./src
 
 # Expose production port
 EXPOSE 3000
 
-USER umiuser
+USER lumiuser
 
 # Healthcheck for AWS Load Balancer / ECS target group
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

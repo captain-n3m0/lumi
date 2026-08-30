@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # ==========================================================
   # Web App & Ingest Gateway (TanStack Start + Viem + RPC Engine)
