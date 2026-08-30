@@ -11,6 +11,7 @@ import {
   LogOut,
   Calculator,
   Sun,
+  Moon,
   Loader2,
   Sparkles,
   Wallet,
@@ -19,6 +20,7 @@ import {
 import type { OpenSeaCollection } from "@/lib/opensea";
 import { searchCollectionsUnified } from "@/lib/collectionSearch";
 import { useWeb3Wallet } from "@/lib/useWeb3Wallet";
+import { useTheme } from "@/lib/theme";
 
 function Toggle({
   checked,
@@ -57,7 +59,7 @@ const nav = [
 
 export function UmiLayout({ children }: { children: ReactNode }) {
   const [usd, setUsd] = useState(false);
-  const [light, setLight] = useState(false);
+  const { isDark, toggleTheme } = useTheme();
   const wallet = useWeb3Wallet();
 
   return (
@@ -69,7 +71,7 @@ export function UmiLayout({ children }: { children: ReactNode }) {
               <span className="grid size-5 place-items-center rounded-full bg-primary/10">
                 <Leaf className="size-3 text-primary" />
               </span>
-              <span className="text-xl font-semibold tracking-tight text-foreground">umi</span>
+              <span className="text-xl font-semibold tracking-tight text-foreground">lumi</span>
             </div>
 
             <nav className="flex flex-col gap-0.5">
@@ -155,9 +157,18 @@ export function UmiLayout({ children }: { children: ReactNode }) {
             </div>
           </div>
 
-          <div className="mt-4 flex items-center gap-2 px-1">
-            <Toggle checked={light} onChange={setLight} label="Toggle theme" />
-            <Sun className="size-4 text-muted-foreground" />
+          <div className="mt-4 flex items-center justify-between rounded-xl border border-border bg-card p-2.5 shadow-sm">
+            <div className="flex items-center gap-2">
+              {isDark ? (
+                <Moon className="size-4 text-primary" />
+              ) : (
+                <Sun className="size-4 text-amber-500" />
+              )}
+              <span className="text-xs font-medium text-foreground">
+                {isDark ? "Dark" : "Light"}
+              </span>
+            </div>
+            <Toggle checked={isDark} onChange={toggleTheme} label="Toggle theme" />
           </div>
         </aside>
 

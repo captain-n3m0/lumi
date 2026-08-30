@@ -9,13 +9,13 @@ import type { OpenSeaCollection } from "@/lib/opensea";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Umi — Multi-chain NFT Mint Scheduler" },
+      { title: "Lumi — Multi-chain NFT Mint Scheduler" },
       {
         name: "description",
         content:
           "Schedule NFT mints across chains, manage hundreds of wallets, and disperse gas from one simple dashboard.",
       },
-      { property: "og:title", content: "Umi — Multi-chain NFT Mint Scheduler" },
+      { property: "og:title", content: "Lumi — Multi-chain NFT Mint Scheduler" },
       {
         property: "og:description",
         content: "Schedule mints, manage wallets, and disperse gas from one simple dashboard.",

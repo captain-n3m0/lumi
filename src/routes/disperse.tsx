@@ -5,12 +5,12 @@ import { EmptyState, SearchBar, UmiLayout } from "@/components/UmiLayout";
 export const Route = createFileRoute("/disperse")({
   head: () => ({
     meta: [
-      { title: "Disperse — Umi" },
+      { title: "Disperse — Lumi" },
       {
         name: "description",
-        content: "Send gas from a funder wallet to many wallets at once with Umi's disperse tool.",
+        content: "Send gas from a funder wallet to many wallets at once with Lumi's disperse tool.",
       },
-      { property: "og:title", content: "Disperse — Umi" },
+      { property: "og:title", content: "Disperse — Lumi" },
       {
         property: "og:description",
         content: "Send gas from a funder wallet to many wallets at once.",

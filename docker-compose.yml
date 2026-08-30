@@ -8,7 +8,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: umi_sniper_app
+    container_name: lumi_sniper_app
     restart: always
     ports:
       - "3000:3000"
@@ -26,7 +26,7 @@ services:
     depends_on:
       - redis
     networks:
-      - umi_network
+      - lumi_network
     deploy:
       resources:
         limits:
@@ -41,7 +41,7 @@ services:
   # ==========================================================
   redis:
     image: redis:7-alpine
-    container_name: umi_redis_queue
+    container_name: lumi_redis_queue
     restart: always
     command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy noeviction
     ports:
@@ -49,10 +49,10 @@ services:
     volumes:
       - redis_data:/data
     networks:
-      - umi_network
+      - lumi_network
 
 networks:
-  umi_network:
+  lumi_network:
     driver: bridge
 
 volumes:

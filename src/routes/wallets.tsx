@@ -5,12 +5,12 @@ import { EmptyState, SearchBar, UmiLayout } from "@/components/UmiLayout";
 export const Route = createFileRoute("/wallets")({
   head: () => ({
     meta: [
-      { title: "Wallets — Umi" },
+      { title: "Wallets — Lumi" },
       {
         name: "description",
-        content: "Generate, import, and track balances for all of your minting wallets in Umi.",
+        content: "Generate, import, and track balances for all of your minting wallets in Lumi.",
       },
-      { property: "og:title", content: "Wallets — Umi" },
+      { property: "og:title", content: "Wallets — Lumi" },
       {
         property: "og:description",
         content: "Generate, import, and track balances for all of your minting wallets.",

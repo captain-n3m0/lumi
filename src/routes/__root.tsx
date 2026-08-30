@@ -8,6 +8,7 @@ import {
   Scripts,
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
+import { initializeTheme } from "../lib/theme";
 
 import appCss from "../styles.css?url";
 
@@ -73,13 +74,13 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Umi Auto Mint" },
+      { title: "Lumi Auto Mint" },
       {
         name: "description",
         content: "Multi-chain NFT mint scheduler, wallet management, and gas disperse dashboard.",
       },
-      { name: "author", content: "Umi" },
-      { property: "og:title", content: "Umi Auto Mint" },
+      { name: "author", content: "Lumi" },
+      { property: "og:title", content: "Lumi Auto Mint" },
       {
         property: "og:description",
         content: "Multi-chain NFT mint scheduler, wallet management, and gas disperse dashboard.",
@@ -103,8 +104,22 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootShell({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" className="dark" suppressHydrationWarning>
       <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              try {
+                var theme = localStorage.getItem('lumi_theme') || 'dark';
+                if (theme === 'dark') {
+                  document.documentElement.classList.add('dark');
+                } else {
+                  document.documentElement.classList.remove('dark');
+                }
+              } catch (e) {}
+            `,
+          }}
+        />
         <HeadContent />
       </head>
       <body>
@@ -117,6 +132,10 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+
+  useEffect(() => {
+    initializeTheme();
+  }, []);
 
   return (
     <QueryClientProvider client={queryClient}>
