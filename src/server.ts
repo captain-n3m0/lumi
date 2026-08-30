@@ -44,8 +44,83 @@ function isH3SwallowedErrorBody(body: string): boolean {
   }
 }
 
+interface OpenSeaCollectionRaw {
+  collection: string;
+  name?: string;
+  total_supply?: number;
+  image_url?: string;
+  opensea_url?: string;
+  contracts?: Array<{
+    address?: string;
+    chain?: string;
+  }>;
+}
+
+interface OpenSeaApiResponse {
+  collections?: OpenSeaCollectionRaw[];
+}
+
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
+    const url = new URL(request.url);
+
+    // ==========================================
+    // Server-Side Proxy: OpenSea & Multi-Chain API
+    // ==========================================
+    if (url.pathname.startsWith("/api/opensea/search")) {
+      const q = url.searchParams.get("q") || "";
+      const chain = url.searchParams.get("chain") || "ethereum";
+      const apiKey = process.env.OPENSEA_API_KEY || "";
+
+      try {
+        const headers: Record<string, string> = {
+          Accept: "application/json",
+        };
+        if (apiKey) {
+          headers["x-api-key"] = apiKey;
+        }
+
+        const openseaRes = await fetch(
+          `https://api.opensea.io/api/v2/collections?chain=${encodeURIComponent(chain)}&limit=25`,
+          { headers },
+        );
+
+        if (openseaRes.ok) {
+          const data = (await openseaRes.json()) as OpenSeaApiResponse;
+          const collections = (data.collections || [])
+            .filter((c: OpenSeaCollectionRaw) => {
+              const name = (c.name || c.collection || "").toLowerCase();
+              return (
+                name.includes(q.toLowerCase()) ||
+                c.collection.toLowerCase().includes(q.toLowerCase())
+              );
+            })
+            .map((item: OpenSeaCollectionRaw) => ({
+              collection: item.collection,
+              name: item.name || item.collection,
+              contractAddress:
+                item.contracts?.[0]?.address || "0x0000000000000000000000000000000000000000",
+              chain: item.contracts?.[0]?.chain || chain,
+              itemCount: item.total_supply || 0,
+              slug: item.collection,
+              imageUrl: item.image_url,
+              openseaUrl: item.opensea_url || `https://opensea.io/collection/${item.collection}`,
+            }));
+
+          return new Response(JSON.stringify({ collections }), {
+            headers: { "content-type": "application/json" },
+          });
+        }
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "OpenSea fetch failed";
+        console.warn("OpenSea proxy fetch error:", message);
+      }
+
+      return new Response(JSON.stringify({ collections: [] }), {
+        headers: { "content-type": "application/json" },
+      });
+    }
+
     try {
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);

@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  # ==========================================================
+  # Web App & Ingest Gateway (TanStack Start + Viem + RPC Engine)
+  # ==========================================================
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: umi_sniper_app
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOST=0.0.0.0
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - OPENSEA_API_KEY=${OPENSEA_API_KEY:-}
+      - ETH_RPC_URL=${ETH_RPC_URL:-https://eth.llamarpc.com}
+      - BASE_RPC_URL=${BASE_RPC_URL:-https://mainnet.base.org}
+      - ARB_RPC_URL=${ARB_RPC_URL:-https://arb1.arbitrum.io/rpc}
+      - BLAST_RPC_URL=${BLAST_RPC_URL:-https://rpc.blast.io}
+    depends_on:
+      - redis
+    networks:
+      - umi_network
+    deploy:
+      resources:
+        limits:
+          cpus: '2.00'
+          memory: 2048M
+        reservations:
+          cpus: '0.50'
+          memory: 512M
+
+  # ==========================================================
+  # Redis Queue Broker (BullMQ / In-Memory Task Scheduler)
+  # ==========================================================
+  redis:
+    image: redis:7-alpine
+    container_name: umi_redis_queue
+    restart: always
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy noeviction
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - umi_network
+
+networks:
+  umi_network:
+    driver: bridge
+
+volumes:
+  redis_data:
+    driver: local

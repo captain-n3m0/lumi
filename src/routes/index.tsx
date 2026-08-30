@@ -1,5 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useState } from "react";
 import { Banner, EmptyState, SearchBar, UmiLayout } from "@/components/UmiLayout";
+import { MintScheduleModal } from "@/components/MintScheduleModal";
+import { ScheduledMintsList } from "@/components/ScheduledMintsList";
+import { useScheduledMints } from "@/lib/mintStore";
+import type { OpenSeaCollection } from "@/lib/opensea";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -21,6 +26,15 @@ export const Route = createFileRoute("/")({
 });
 
 function Mints() {
+  const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
+  const [selectedCollection, setSelectedCollection] = useState<OpenSeaCollection | null>(null);
+  const [scheduledMints] = useScheduledMints();
+
+  const handleSelectCollection = (col: OpenSeaCollection) => {
+    setSelectedCollection(col);
+    setScheduleModalOpen(true);
+  };
+
   return (
     <UmiLayout>
       <div className="flex flex-col gap-3">
@@ -28,9 +42,20 @@ function Mints() {
           text="Mint didn't work? Found a bug? Please report it."
           actionLabel="Report an issue"
         />
-        <SearchBar placeholder="Search" />
-        <EmptyState title="No mints founds" subtitle="Once scheduled, they'll appear here" />
+        <SearchBar placeholder="Search" onSelect={handleSelectCollection} />
+
+        {scheduledMints.length > 0 ? (
+          <ScheduledMintsList />
+        ) : (
+          <EmptyState title="No mints found" subtitle="Once scheduled, they'll appear here" />
+        )}
       </div>
+
+      <MintScheduleModal
+        open={scheduleModalOpen}
+        onOpenChange={setScheduleModalOpen}
+        collection={selectedCollection}
+      />
     </UmiLayout>
   );
 }
