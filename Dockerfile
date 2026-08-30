@@ -7,12 +7,13 @@
 FROM node:22-alpine AS builder
 WORKDIR /app
 
-# Ensure Nitro targets Node.js standalone HTTP server
+# Ensure dev dependencies and executables (Vite, Nitro, TypeScript) are fully available in build stage
+ENV NODE_ENV=development
+ENV PATH=/app/node_modules/.bin:$PATH
 ENV NITRO_PRESET=node-server
-ENV NODE_ENV=production
 
 COPY package.json package-lock.json* ./
-RUN if [ -f package-lock.json ]; then npm ci --legacy-peer-deps; else npm install --legacy-peer-deps; fi
+RUN npm install --include=dev --legacy-peer-deps
 
 COPY . .
 
