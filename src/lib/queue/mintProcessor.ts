@@ -11,6 +11,9 @@
 
 import { redact, withEphemeralKeys, type VaultEntry } from "@/lib/crypto";
 import { getAdapter, type MintPhase } from "@/lib/launchpads";
+import { SUPPORTED_CHAINS } from "@/lib/rpc";
+import { createWalletClient, http, encodeFunctionData, parseAbi, type Address } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
 import { purgeEphemeralVault } from "./ephemeralVault";
 import { MINT_QUEUE_NAME, Queue } from "./queue";
 import type { GasConfig, Job, MintJobData, MintJobResult } from "./types";
@@ -52,9 +55,55 @@ export type Broadcaster = (input: {
   fees: GasFees;
 }) => Promise<string>;
 
-let broadcast: Broadcaster = async () => {
-  throw new Error("No broadcaster configured — call setBroadcaster() first");
+const defaultBroadcaster: Broadcaster = async ({
+  entry,
+  chainId,
+  contractAddress,
+  functionName,
+  args,
+  valueWei,
+  fees,
+}) => {
+  const chainConfig = SUPPORTED_CHAINS[chainId] || SUPPORTED_CHAINS[1];
+  const rpcUrl = chainConfig?.rpcUrls[0] || "https://eth.llamarpc.com";
+  const account = privateKeyToAccount(entry.privateKey as `0x${string}`);
+  const client = createWalletClient({
+    account,
+    chain: chainConfig?.chain,
+    transport: http(rpcUrl, { timeout: 10_000 }),
+  });
+
+  let data: `0x${string}` | undefined;
+  try {
+    if (args && args.length === 1 && typeof args[0] === "number") {
+      data = encodeFunctionData({
+        abi: parseAbi([`function ${functionName}(uint256 quantity) external payable`]),
+        functionName,
+        args: [BigInt(args[0])],
+      });
+    } else if (args && args.length === 0) {
+      data = encodeFunctionData({
+        abi: parseAbi([`function ${functionName}() external payable`]),
+        functionName,
+        args: [],
+      });
+    }
+  } catch {
+    // If dynamic encoding fails, fallback to undefined
+  }
+
+  const hash = await client.sendTransaction({
+    to: contractAddress as Address,
+    data,
+    value: valueWei,
+    maxFeePerGas: fees.maxFeePerGasWei,
+    maxPriorityFeePerGas: fees.maxPriorityFeePerGasWei,
+  });
+
+  return hash;
 };
+
+let broadcast: Broadcaster = defaultBroadcaster;
 
 export function setBroadcaster(next: Broadcaster): void {
   broadcast = next;

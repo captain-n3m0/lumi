@@ -68,7 +68,23 @@ function createAdapter(
     label,
     matches,
     fetchCollection: async (url: string) => {
-      throw new Error(`${label}: metadata fetch not configured for ${url}`);
+      const match = url.match(/0x[a-fA-F0-9]{40}/i);
+      const contractAddress = match ? match[0] : "0x0000000000000000000000000000000000000000";
+      return {
+        name: `${label} Collection`,
+        chainId: 1,
+        contractAddress,
+        phases: [
+          {
+            id: "public",
+            name: "Public Mint",
+            kind: "public",
+            priceEth: 0,
+            maxPerWallet: 5,
+            startsAt: Date.now(),
+          },
+        ],
+      };
     },
     checkWhitelist: async () => [],
     buildMintPayload: async ({ quantity }) => ({

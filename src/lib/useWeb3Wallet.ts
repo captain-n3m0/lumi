@@ -8,6 +8,7 @@ export interface ConnectedWalletState {
   chainId: number;
   isConnected: boolean;
   isConnecting: boolean;
+  walletType: string;
   balanceFormatted: string;
   chainName: string;
   error: string | null;
@@ -17,7 +18,24 @@ interface EthereumWindow extends Window {
   ethereum?: EIP1193Provider & {
     on?: (event: string, handler: (...args: unknown[]) => void) => void;
     removeListener?: (event: string, handler: (...args: unknown[]) => void) => void;
+    isMetaMask?: boolean;
+    isRabby?: boolean;
+    isCoinbaseWallet?: boolean;
+    isRainbow?: boolean;
+    isPhantom?: boolean;
+    isRobinhood?: boolean;
   };
+  robinhood?: EIP1193Provider;
+}
+
+function detectProviderWalletType(win: EthereumWindow): string {
+  if (win.ethereum?.isRobinhood || win.robinhood) return "robinhood";
+  if (win.ethereum?.isRabby) return "rabby";
+  if (win.ethereum?.isCoinbaseWallet) return "coinbase";
+  if (win.ethereum?.isRainbow) return "rainbow";
+  if (win.ethereum?.isPhantom) return "phantom";
+  if (win.ethereum?.isMetaMask) return "metamask";
+  return "metamask";
 }
 
 export function useWeb3Wallet() {
@@ -26,6 +44,7 @@ export function useWeb3Wallet() {
     chainId: 1,
     isConnected: false,
     isConnecting: false,
+    walletType: "metamask",
     balanceFormatted: "0.00",
     chainName: "Ethereum",
     error: null,
@@ -51,7 +70,7 @@ export function useWeb3Wallet() {
     if (!ethereum) {
       setState((prev) => ({
         ...prev,
-        error: "No Ethereum browser wallet found (MetaMask, Rabby, Coinbase Wallet)",
+        error: "No Web3 browser wallet found (MetaMask, Rabby, Robinhood Wallet, Coinbase)",
       }));
       return;
     }
@@ -59,6 +78,7 @@ export function useWeb3Wallet() {
     setState((prev) => ({ ...prev, isConnecting: true, error: null }));
 
     try {
+      const detectedType = detectProviderWalletType(win);
       const accounts = (await ethereum.request({
         method: "eth_requestAccounts",
       })) as string[];
@@ -79,6 +99,7 @@ export function useWeb3Wallet() {
         chainId,
         isConnected: true,
         isConnecting: false,
+        walletType: detectedType,
         balanceFormatted: "0.00",
         chainName: SUPPORTED_CHAINS[chainId]?.name || `Chain ${chainId}`,
         error: null,
@@ -101,6 +122,7 @@ export function useWeb3Wallet() {
       chainId: 1,
       isConnected: false,
       isConnecting: false,
+      walletType: "metamask",
       balanceFormatted: "0.00",
       chainName: "Ethereum",
       error: null,
