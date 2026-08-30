@@ -47,7 +47,7 @@ function Mints() {
       openseaUrl: "",
       imageUrl: "",
       itemCount: 0,
-      verified: false,
+      slug: "custom",
     });
     setScheduleModalOpen(true);
   };

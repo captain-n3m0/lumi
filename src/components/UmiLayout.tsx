@@ -22,6 +22,7 @@ import {
   Layers,
   Copy,
   Check,
+  AlertTriangle,
 } from "lucide-react";
 import type { OpenSeaCollection } from "@/lib/opensea";
 import { searchCollectionsUnified } from "@/lib/collectionSearch";
@@ -32,6 +33,17 @@ import { useScheduledMints } from "@/lib/mintStore";
 import { ChainIcon } from "@/components/icons/ChainIcons";
 import { PlatformIcon } from "@/components/icons/PlatformIcons";
 import { WalletIcon } from "@/components/icons/WalletIcons";
+import { ChainSelector } from "@/components/ChainSelector";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@/components/ui/alert-dialog";
 
 function Toggle({
   checked,
@@ -105,6 +117,7 @@ export function LumiLayout({ children }: { children: ReactNode }) {
   const [calcGasGwei, setCalcGasGwei] = useState("18");
   const [calcEthPrice, setCalcEthPrice] = useState("3180");
   const [copiedAddr, setCopiedAddr] = useState(false);
+  const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
   const { isDark, toggleTheme } = useTheme();
   const wallet = useWallet();
   const { wallets } = useManagedWallets();
@@ -222,6 +235,9 @@ export function LumiLayout({ children }: { children: ReactNode }) {
               )}
             </button>
 
+            {/* Real-time Chain Switcher */}
+            <ChainSelector />
+
             {/* Web3 Wallet Connect */}
             {wallet.isConnected && wallet.address ? (
               <div className="flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs shadow-2xs">
@@ -246,7 +262,7 @@ export function LumiLayout({ children }: { children: ReactNode }) {
                 </span>
                 <button
                   type="button"
-                  onClick={() => wallet.disconnect()}
+                  onClick={() => setShowDisconnectConfirm(true)}
                   aria-label="Disconnect wallet"
                   className="text-muted-foreground hover:text-destructive transition ml-1 p-0.5 rounded cursor-pointer"
                   title="Disconnect"
@@ -418,6 +434,46 @@ export function LumiLayout({ children }: { children: ReactNode }) {
           </div>
         </div>
       )}
+
+      {/* Confirm Wallet Disconnect Dialog */}
+      <AlertDialog open={showDisconnectConfirm} onOpenChange={setShowDisconnectConfirm}>
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-foreground font-bold tracking-tight flex items-center gap-2">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                <AlertTriangle className="size-4" />
+              </span>
+              <span>Confirm Disconnection</span>
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-muted-foreground text-xs mt-2.5 leading-relaxed">
+              Disconnecting your active wallet session will immediately suspend contract-level
+              balance tracking, auto-refreshes, and ongoing automated interactions inside the
+              matrix.
+              <span className="block mt-2 font-semibold text-amber-500/90 bg-amber-500/5 border border-amber-500/15 p-2 rounded-md">
+                Warning: Any pending high-frequency mint schedules or transaction dispatch sequences
+                could be stalled.
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-4 gap-2">
+            <AlertDialogCancel
+              onClick={() => setShowDisconnectConfirm(false)}
+              className="text-xs font-semibold cursor-pointer"
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={async () => {
+                setShowDisconnectConfirm(false);
+                await wallet.disconnect();
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90 text-xs font-semibold cursor-pointer"
+            >
+              Disconnect Session
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -513,15 +569,17 @@ export function SearchBar({
           onSubmit={async (e) => {
             e.preventDefault();
             if (!query.trim()) return;
-            if (results[0] && onSelect) {
-              onSelect(results[0]);
+            const firstRes = results[0];
+            if (firstRes && onSelect) {
+              onSelect(firstRes);
               return;
             }
             try {
               setLoading(true);
               const found = await searchCollectionsUnified(query.trim());
-              if (found.length > 0 && onSelect) {
-                onSelect(found[0]);
+              const firstFound = found[0];
+              if (firstFound && onSelect) {
+                onSelect(firstFound);
               }
             } finally {
               setLoading(false);

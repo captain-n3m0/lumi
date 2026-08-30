@@ -139,7 +139,7 @@ function Disperse() {
       try {
         const { createPublicClient, http } = await import("viem");
         const client = createPublicClient({
-          transport: http(currentChain.rpcUrl),
+          transport: http(currentChain.rpcUrls[0]),
         });
         const bal = await client.getBalance({
           address: selectedSender!.address as `0x${string}`,
@@ -201,7 +201,7 @@ function Disperse() {
     setExternalAddressInput("");
   };
 
-  const handleOpenPlan = () => {
+  const handleOpenPlan = async () => {
     if (!selectedSender) {
       alert("Please select a sender wallet from your vault or connect Web3.");
       return;
@@ -220,28 +220,29 @@ function Disperse() {
     let plan: DispersePlan;
     if (disperseMode === "random") {
       const minVal = perWalletVal * 0.8;
-      const maxVal = perWalletVal * 1.2;
-      plan = planDisperseEther(
-        selectedSender.address as `0x${string}`,
+      plan = await planDisperseEther({
+        senderAddress: selectedSender.address as `0x${string}`,
         recipientAddresses,
-        minVal.toString(),
-        "random",
-        maxVal.toString(),
-      );
+        amountPerWalletEth: minVal.toFixed(5),
+        chain: currentChain,
+      });
     } else if (disperseMode === "split") {
-      plan = planDisperseEther(
-        selectedSender.address as `0x${string}`,
+      const totalAmount = parseFloat(amountPerWallet) || 0;
+      const splitAmount =
+        recipientAddresses.length > 0 ? totalAmount / recipientAddresses.length : 0;
+      plan = await planDisperseEther({
+        senderAddress: selectedSender.address as `0x${string}`,
         recipientAddresses,
-        amountPerWallet,
-        "split",
-      );
+        amountPerWalletEth: splitAmount.toFixed(5),
+        chain: currentChain,
+      });
     } else {
-      plan = planDisperseEther(
-        selectedSender.address as `0x${string}`,
+      plan = await planDisperseEther({
+        senderAddress: selectedSender.address as `0x${string}`,
         recipientAddresses,
-        amountPerWallet,
-        "flat",
-      );
+        amountPerWalletEth: amountPerWallet,
+        chain: currentChain,
+      });
     }
 
     setCurrentPlan(plan);
@@ -256,24 +257,65 @@ function Disperse() {
     setExecError(null);
 
     try {
-      if (selectedSender.privateKey) {
-        const res = await executeDisperseEther(
-          currentPlan,
-          selectedSender.privateKey as `0x${string}`,
-          currentChain,
-        );
+      if (selectedSenderId !== "web3_wallet" && selectedSender.privateKey) {
+        const res = await executeDisperseEther({
+          senderPrivateKey: selectedSender.privateKey as `0x${string}`,
+          recipients: currentPlan.recipients,
+          chain: currentChain,
+        });
         if (res.success) {
           setExecResult(res);
         } else {
           setExecError(res.error || "Disperse transaction failed on chain");
         }
       } else if (web3Wallet.isConnected) {
-        await new Promise((r) => setTimeout(r, 1200));
-        setExecResult({
-          success: true,
-          txHash: "0x7a3f4b8c9d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a",
-          transfersCount: currentPlan.recipients.length,
-        });
+        if (currentChain.disperseContract && currentPlan.recipients.length > 2) {
+          const addresses = currentPlan.recipients.map((r) => r.address);
+          const values = currentPlan.recipients.map((r) => r.amountWei);
+          const totalValue = currentPlan.totalWei;
+
+          const txHash = await web3Wallet.writeContract({
+            address: currentChain.disperseContract as `0x${string}`,
+            abi: [
+              {
+                name: "disperseEther",
+                type: "function",
+                stateMutability: "payable",
+                inputs: [
+                  { name: "recipients", type: "address[]" },
+                  { name: "values", type: "uint256[]" },
+                ],
+                outputs: [],
+              },
+            ],
+            functionName: "disperseEther",
+            args: [addresses, values],
+            value: totalValue,
+          });
+
+          setExecResult({
+            success: true,
+            txHash,
+            transfersCount: currentPlan.recipients.length,
+          });
+        } else {
+          // Direct sequential fallback using connected wallet
+          let lastHash = "" as `0x${string}`;
+          for (const recipient of currentPlan.recipients) {
+            const hash = await web3Wallet.sendTransaction({
+              to: recipient.address,
+              value: recipient.amountWei,
+            });
+            lastHash = hash;
+          }
+          setExecResult({
+            success: true,
+            txHash: lastHash,
+            transfersCount: currentPlan.recipients.length,
+          });
+        }
+      } else {
+        throw new Error("No sender private key available and Web3 wallet not connected.");
       }
     } catch (err: unknown) {
       setExecError(err instanceof Error ? err.message : "Disperse failed");

@@ -98,6 +98,7 @@ const defaultBroadcaster: Broadcaster = async ({
     value: valueWei,
     maxFeePerGas: fees.maxFeePerGasWei,
     maxPriorityFeePerGas: fees.maxPriorityFeePerGasWei,
+    chain: null,
   });
 
   return hash;

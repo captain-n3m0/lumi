@@ -144,7 +144,7 @@ export function useWallet(): UseWalletReturn {
 
   const balanceQuery = useBalance({
     address: account.address,
-    chainId: account.chainId,
+    chainId: account.chainId as any,
   });
 
   const { signMessageAsync } = useSignMessage();
@@ -180,7 +180,7 @@ export function useWallet(): UseWalletReturn {
 
         await connectAsync({
           connector: targetConnector,
-          chainId: targetChainId,
+          chainId: targetChainId as any,
         });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : "Failed to connect wallet";
@@ -205,7 +205,7 @@ export function useWallet(): UseWalletReturn {
     async (targetChainId: number) => {
       setCustomError(null);
       try {
-        await switchChainAsync({ chainId: targetChainId });
+        await switchChainAsync({ chainId: targetChainId as any });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : "Failed to switch chain";
         console.error("useWallet switchChain error:", err);
@@ -307,16 +307,19 @@ Issued At: ${issuedAt}`;
       const value =
         typeof params.value === "string" ? parseEther(params.value) : (params.value ?? 0n);
 
+      const txParams: any = {
+        to: params.to,
+        value,
+      };
+      if (params.data !== undefined) txParams.data = params.data;
+      if (params.gas !== undefined) txParams.gas = params.gas;
+      if (params.maxFeePerGas !== undefined) txParams.maxFeePerGas = params.maxFeePerGas;
+      if (params.maxPriorityFeePerGas !== undefined)
+        txParams.maxPriorityFeePerGas = params.maxPriorityFeePerGas;
+      if (params.chainId !== undefined) txParams.chainId = params.chainId;
+
       try {
-        return await sendTransactionAsync({
-          to: params.to,
-          value,
-          data: params.data,
-          gas: params.gas,
-          maxFeePerGas: params.maxFeePerGas,
-          maxPriorityFeePerGas: params.maxPriorityFeePerGas,
-          chainId: params.chainId,
-        });
+        return await sendTransactionAsync(txParams);
       } catch (err: unknown) {
         const message_ = err instanceof Error ? err.message : "Transaction failed";
         setCustomError(message_);
@@ -333,12 +336,17 @@ Issued At: ${issuedAt}`;
       valueWei?: bigint;
       chainId?: number;
     }): Promise<Hash> => {
-      return await sendTransaction({
+      const txParams: any = {
         to: params.to,
-        data: params.data,
         value: params.valueWei || 0n,
-        chainId: params.chainId,
-      });
+      };
+      if (params.data !== undefined) {
+        txParams.data = params.data;
+      }
+      if (params.chainId !== undefined) {
+        txParams.chainId = params.chainId;
+      }
+      return await sendTransaction(txParams);
     },
     [sendTransaction],
   );
@@ -354,14 +362,16 @@ Issued At: ${issuedAt}`;
     }): Promise<Hash> => {
       setCustomError(null);
       try {
-        return await writeContractAsync({
+        const writeParams: any = {
           address: params.address,
           abi: params.abi,
           functionName: params.functionName,
-          args: params.args as readonly unknown[] | undefined,
-          value: params.value,
-          chainId: params.chainId,
-        });
+        };
+        if (params.args !== undefined) writeParams.args = params.args;
+        if (params.value !== undefined) writeParams.value = params.value;
+        if (params.chainId !== undefined) writeParams.chainId = params.chainId;
+
+        return await writeContractAsync(writeParams);
       } catch (err: unknown) {
         const message_ = err instanceof Error ? err.message : "Contract write failed";
         setCustomError(message_);
@@ -372,9 +382,11 @@ Issued At: ${issuedAt}`;
   );
 
   const balance = useMemo(() => {
-    const formattedVal = balanceQuery.data?.formatted
-      ? parseFloat(balanceQuery.data.formatted).toFixed(4)
-      : "0.0000";
+    let formattedVal = "0.0000";
+    if (balanceQuery.data?.value !== undefined) {
+      const ethVal = formatEther(balanceQuery.data.value);
+      formattedVal = parseFloat(ethVal).toFixed(4);
+    }
     return {
       value: balanceQuery.data?.value,
       formatted: formattedVal,

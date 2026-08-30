@@ -1,18 +1,20 @@
 import { useSyncExternalStore, useState, useEffect } from "react";
 import type { MintStage } from "./queue/types";
+import { createPublicClient, http } from "viem";
+import { EVM_CHAINS } from "./chains";
 
 export interface ScheduledMint {
   id: string;
   collectionName: string;
   contractAddress: string;
   chain: string;
-  imageUrl?: string;
+  imageUrl?: string | undefined;
   stage: MintStage;
   scheduledTime: number; // timestamp ms
   walletsCount: number;
   quantityPerWallet: number;
   gasPriority: "aggressive" | "normal" | "custom";
-  txHash?: string;
+  txHash?: string | undefined;
   logs: Array<{ time: string; message: string; type: "info" | "warn" | "error" | "success" }>;
 }
 
@@ -31,6 +33,12 @@ function initFromStorage() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       memoryMints = JSON.parse(raw);
+      // Resume monitoring for active, unconfirmed transactions with txHashes on load
+      memoryMints.forEach((m) => {
+        if (m.txHash && m.stage !== "Confirmed" && m.stage !== "Failed") {
+          monitorOnChainTransaction(m.id, m.chain, m.txHash);
+        }
+      });
     }
   } catch {
     // fallback
@@ -46,6 +54,78 @@ function notify() {
     }
   }
   listeners.forEach((l) => l());
+}
+
+/**
+ * Monitors the transaction receipt on-chain using a public RPC client
+ */
+export function monitorOnChainTransaction(id: string, chainIdOrName: string, txHash: string) {
+  const chain =
+    EVM_CHAINS.find(
+      (c) =>
+        c.id.toLowerCase() === chainIdOrName.toLowerCase() ||
+        c.name.toLowerCase() === chainIdOrName.toLowerCase() ||
+        c.chainId.toString() === chainIdOrName,
+    ) || EVM_CHAINS[0]!;
+
+  const rpcUrl = chain.rpcUrls[0]!;
+  const client = createPublicClient({
+    transport: http(rpcUrl),
+  });
+
+  (async () => {
+    try {
+      updateMintStage(
+        id,
+        "Broadcasting Tx",
+        `[RPC] Broadcasting transaction to ${chain.name} RPC nodes. Tx Hash: ${txHash.slice(0, 10)}...`,
+        txHash,
+      );
+
+      const receipt = await client.waitForTransactionReceipt({
+        hash: txHash as `0x${string}`,
+        timeout: 60000,
+      });
+
+      if (receipt.status === "success") {
+        updateMintStage(
+          id,
+          "Confirmed",
+          `[RPC] Confirmed on-chain in block ${receipt.blockNumber}! Gas used: ${receipt.gasUsed.toString()}`,
+          txHash,
+        );
+      } else {
+        updateMintStage(
+          id,
+          "Failed",
+          `[RPC] Transaction reverted on-chain. Hash: ${txHash}`,
+          txHash,
+        );
+      }
+    } catch (err: unknown) {
+      console.error("Failed to monitor tx:", err);
+      try {
+        const tx = await client.getTransaction({ hash: txHash as `0x${string}` });
+        if (tx && tx.blockNumber) {
+          updateMintStage(
+            id,
+            "Confirmed",
+            `[RPC] Transaction confirmed in block ${tx.blockNumber}.`,
+            txHash,
+          );
+        } else {
+          updateMintStage(
+            id,
+            "Failed",
+            err instanceof Error ? err.message : "Transaction confirmation timed out or failed.",
+            txHash,
+          );
+        }
+      } catch {
+        updateMintStage(id, "Failed", "Transaction confirmation timed out or failed.", txHash);
+      }
+    }
+  })();
 }
 
 export function addScheduledMint(mint: Omit<ScheduledMint, "id" | "logs">): ScheduledMint {
@@ -66,34 +146,60 @@ export function addScheduledMint(mint: Omit<ScheduledMint, "id" | "logs">): Sche
   memoryMints = [newMint, ...memoryMints];
   notify();
 
-  // Simulate lifecycle transitions
   const delay = Math.max(0, newMint.scheduledTime - Date.now());
-  setTimeout(
-    () => {
-      updateMintStage(
-        newMint.id,
-        "Fetching Payload",
-        "Resolving dynamic parameters & merkle proofs",
-      );
-      setTimeout(() => {
+
+  if (newMint.txHash) {
+    monitorOnChainTransaction(newMint.id, newMint.chain, newMint.txHash);
+  } else {
+    setTimeout(
+      async () => {
         updateMintStage(
           newMint.id,
-          "Broadcasting Tx",
-          "Broadcasting signed transactions to RPC nodes",
+          "Fetching Payload",
+          `[RPC] Connecting to ${newMint.chain} RPC node to verify contract status...`,
         );
-        setTimeout(() => {
-          const dummyTx = `0x${Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join("")}`;
+
+        try {
+          const chainConfig =
+            EVM_CHAINS.find(
+              (c) =>
+                c.id.toLowerCase() === newMint.chain.toLowerCase() ||
+                c.name.toLowerCase() === newMint.chain.toLowerCase(),
+            ) || EVM_CHAINS[0]!;
+
+          const rpcUrl = chainConfig.rpcUrls[0]!;
+          const client = createPublicClient({
+            transport: http(rpcUrl),
+          });
+
+          const bytecode = await client.getBytecode({
+            address: newMint.contractAddress as `0x${string}`,
+          });
+
+          if (bytecode && bytecode !== "0x") {
+            updateMintStage(
+              newMint.id,
+              "Broadcasting Tx",
+              `[RPC] Contract verified on-chain at ${newMint.contractAddress}. Ready for wallet broadcast.`,
+            );
+          } else {
+            updateMintStage(
+              newMint.id,
+              "Failed",
+              `[RPC] Validation failed: No contract bytecode found at address ${newMint.contractAddress} on ${chainConfig.name}.`,
+            );
+          }
+        } catch (err: unknown) {
           updateMintStage(
             newMint.id,
-            "Confirmed",
-            `Confirmed on-chain with tx hash: ${dummyTx.slice(0, 10)}...`,
-            dummyTx,
+            "Failed",
+            `[RPC] Failed to query contract status: ${err instanceof Error ? err.message : "Network error"}`,
           );
-        }, 2500);
-      }, 2000);
-    },
-    Math.min(delay, 2000),
-  );
+        }
+      },
+      Math.max(500, delay),
+    );
+  }
 
   return newMint;
 }

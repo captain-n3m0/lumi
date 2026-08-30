@@ -147,13 +147,13 @@ export interface OnChainContractInfo {
   address: Address;
   chainId: number;
   isContract: boolean;
-  name?: string;
-  symbol?: string;
-  totalSupply?: bigint;
-  standard?: "ERC721" | "ERC1155" | "ERC20" | "Custom";
-  mintPriceWei?: bigint;
-  maxSupply?: bigint;
-  owner?: Address;
+  name?: string | undefined;
+  symbol?: string | undefined;
+  totalSupply?: bigint | undefined;
+  standard?: "ERC721" | "ERC1155" | "ERC20" | "Custom" | undefined;
+  mintPriceWei?: bigint | undefined;
+  maxSupply?: bigint | undefined;
+  owner?: Address | undefined;
 }
 
 const ERC_PROBE_ABI = parseAbi([

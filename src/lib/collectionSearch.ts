@@ -13,9 +13,9 @@ export interface CollectionMintStage {
 }
 
 export function parseCollectionUrlOrQuery(input: string): {
-  slug?: string;
-  contractAddress?: string;
-  chain?: string;
+  slug?: string | undefined;
+  contractAddress?: string | undefined;
+  chain?: string | undefined;
   isUrl: boolean;
 } {
   const trimmed = input.trim();
@@ -46,7 +46,7 @@ export function parseCollectionUrlOrQuery(input: string): {
     /(?:https?:\/\/)?(?:www\.)?magiceden\.io\/collections\/(?:([a-zA-Z0-9-_]+)\/)?([a-zA-Z0-9-_]+)/i,
   );
   if (meMatch) {
-    const isHex = /^0x[a-fA-F0-9]{40}$/i.test(meMatch[2]);
+    const isHex = /^0x[a-fA-F0-9]{40}$/i.test(meMatch[2] || "");
     return {
       chain: meMatch[1] || "ethereum",
       contractAddress: isHex ? meMatch[2] : undefined,
@@ -60,7 +60,7 @@ export function parseCollectionUrlOrQuery(input: string): {
     /(?:https?:\/\/)?(?:www\.)?zora\.co\/collect\/(?:([a-zA-Z0-9-_]+):)?(0x[a-fA-F0-9]{40}|[a-zA-Z0-9-_]+)/i,
   );
   if (zoraMatch) {
-    const isHex = /^0x[a-fA-F0-9]{40}$/i.test(zoraMatch[2]);
+    const isHex = /^0x[a-fA-F0-9]{40}$/i.test(zoraMatch[2] || "");
     return {
       chain: zoraMatch[1] || "zora",
       contractAddress: isHex ? zoraMatch[2] : undefined,
@@ -268,7 +268,6 @@ export async function searchCollectionsUnified(
       openseaUrl: trimmed.startsWith("http")
         ? trimmed
         : `https://opensea.io/collection/${parsed.slug}`,
-      verified: true,
     });
   }
 

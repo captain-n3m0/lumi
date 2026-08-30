@@ -271,9 +271,9 @@ export const EVM_CHAINS: ChainInfo[] = [
 ];
 
 export function getChainById(id: string): ChainInfo {
-  return EVM_CHAINS.find((c) => c.id === id) || EVM_CHAINS[0];
+  return EVM_CHAINS.find((c) => c.id === id) || EVM_CHAINS[0]!;
 }
 
 export function getChainByChainId(chainId: number): ChainInfo {
-  return EVM_CHAINS.find((c) => c.chainId === chainId) || EVM_CHAINS[0];
+  return EVM_CHAINS.find((c) => c.chainId === chainId) || EVM_CHAINS[0]!;
 }

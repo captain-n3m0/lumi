@@ -180,7 +180,7 @@ export default {
         status: "healthy",
         uptime: typeof process !== "undefined" && process.uptime ? process.uptime() : 0,
         timestamp: Date.now(),
-        environment: process.env.NODE_ENV || "production",
+        environment: process.env["NODE_ENV"] || "production",
         version: "2.5.0",
         chainsSupported: SERVER_CHAINS.length,
         services: {
@@ -243,10 +243,11 @@ export default {
         if (res.status === "fulfilled") {
           return res.value;
         }
+        const chain = targetChains[idx];
         return {
-          chainId: targetChains[idx].id,
-          chainName: targetChains[idx].name,
-          symbol: targetChains[idx].symbol,
+          chainId: chain ? chain.id : 1,
+          chainName: chain ? chain.name : "Ethereum",
+          symbol: chain ? chain.symbol : "ETH",
           gasPriceGwei: 15.0,
           gasPriceWei: "0x37e11d600",
           status: "fallback",
@@ -263,6 +264,10 @@ export default {
       const address = url.searchParams.get("address") || "";
       const chainId = Number(url.searchParams.get("chainId") || "1");
       const chain = SERVER_CHAINS.find((c) => c.id === chainId) || SERVER_CHAINS[0];
+
+      if (!chain) {
+        return jsonResponse({ error: "Chain configuration not found" }, 500);
+      }
 
       if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
         return jsonResponse({ error: "Invalid Ethereum address format", isContract: false }, 400);
@@ -305,12 +310,48 @@ export default {
     // ==========================================
     // Server-Side Proxy: OpenSea & Multi-Chain API
     // ==========================================
+    if (
+      url.pathname.startsWith("/api/opensea/drop") ||
+      (url.pathname.startsWith("/api/opensea") && url.searchParams.get("action") === "drop")
+    ) {
+      const slug = url.searchParams.get("slug") || "";
+      if (!slug) {
+        return jsonResponse({ error: "Slug required" }, 400);
+      }
+      const apiKey = process.env["OPENSEA_API_KEY"] || "";
+      const headers: Record<string, string> = {
+        Accept: "application/json",
+      };
+      if (apiKey) {
+        headers["x-api-key"] = apiKey;
+      }
+
+      try {
+        const dropRes = await fetch(
+          `https://api.opensea.io/api/v2/drops/${encodeURIComponent(slug)}`,
+          { headers },
+        );
+        if (dropRes.ok) {
+          const dropData = await dropRes.json();
+          return jsonResponse(dropData, 200, 60);
+        } else {
+          return jsonResponse(
+            { error: `OpenSea returned status ${dropRes.status}` },
+            dropRes.status,
+          );
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Fetch failed";
+        return jsonResponse({ error: msg }, 500);
+      }
+    }
+
     if (url.pathname.startsWith("/api/opensea")) {
       const q = url.searchParams.get("q") || "";
       const slug = url.searchParams.get("slug") || "";
       const address = url.searchParams.get("address") || "";
       const chain = url.searchParams.get("chain") || "ethereum";
-      const apiKey = process.env.OPENSEA_API_KEY || "";
+      const apiKey = process.env["OPENSEA_API_KEY"] || "";
 
       const headers: Record<string, string> = {
         Accept: "application/json",

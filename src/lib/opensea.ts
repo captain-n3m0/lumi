@@ -5,7 +5,7 @@ export interface OpenSeaCollection {
   chain: string;
   itemCount: number;
   slug: string;
-  imageUrl?: string;
+  imageUrl?: string | undefined;
   openseaUrl: string;
 }
 
