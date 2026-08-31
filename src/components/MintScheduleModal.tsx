@@ -33,6 +33,436 @@ interface MintScheduleModalProps {
   onSelectCollection?: (col: OpenSeaCollection) => void;
 }
 
+type RawDropStage = Record<string, unknown>;
+type WalletEligibilityStatus =
+  "eligible" | "ineligible" | "not_active" | "unknown" | "auth_error" | "drop_not_found" | "error";
+
+interface DropStageEligibilityItem {
+  stageId?: string;
+  stageName?: string;
+  eligible: boolean | null;
+  reason?: string;
+}
+
+interface DropWalletEligibilityResult {
+  address: string;
+  eligible: boolean | null;
+  status: WalletEligibilityStatus;
+  reason?: string;
+  stageEligibilities?: DropStageEligibilityItem[];
+  source: "opensea-drop-details" | "opensea-mint-action" | "opensea";
+}
+
+interface DropEligibilityResponse {
+  slug?: string;
+  checked?: number;
+  wallets?: DropWalletEligibilityResult[];
+  timestamp?: number;
+  error?: string;
+}
+
+type StageEligibilityStatus = "verified" | "ineligible" | "unknown" | "not_active" | "error";
+
+interface StageEligibilitySummary {
+  status: StageEligibilityStatus;
+  eligibleCount: number;
+  checkedCount: number;
+  detail: string;
+  sourceLabel: string;
+}
+
+interface EligibilityDisplay {
+  label: string;
+  detail: string;
+  labelClass: string;
+  pillClass: string;
+  requiresVerification: boolean;
+  warning?: string;
+}
+
+function readStageValue(stage: RawDropStage, keys: string[]): unknown {
+  for (const key of keys) {
+    if (stage[key] !== undefined && stage[key] !== null) return stage[key];
+  }
+  return undefined;
+}
+
+function parseStageString(stage: RawDropStage, keys: string[], fallback: string): string {
+  const value = readStageValue(stage, keys);
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function parseStageNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "bigint") return Number(value);
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
+function parseStagePriceEth(value: unknown): number {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>;
+    return parseStagePriceEth(
+      record["eth"] ?? record["amount"] ?? record["value"] ?? record["price"],
+    );
+  }
+
+  if (typeof value === "string" && /^\d{13,}$/.test(value.trim())) {
+    try {
+      return Number(BigInt(value.trim())) / 1e18;
+    } catch {
+      return 0;
+    }
+  }
+
+  const parsed = parseStageNumber(value);
+  return parsed !== undefined && parsed >= 0 ? parsed : 0;
+}
+
+function parseStageTimestamp(value: unknown): number | undefined {
+  if (typeof value === "string" && value.trim()) {
+    const trimmed = value.trim();
+    const asNumber = Number(trimmed);
+    if (Number.isFinite(asNumber)) {
+      return asNumber > 1_000_000_000_000 ? asNumber : asNumber * 1000;
+    }
+
+    const parsedDate = Date.parse(trimmed);
+    return Number.isFinite(parsedDate) ? parsedDate : undefined;
+  }
+
+  const parsed = parseStageNumber(value);
+  if (parsed === undefined || parsed <= 0) return undefined;
+  return parsed > 1_000_000_000_000 ? parsed : parsed * 1000;
+}
+
+function parseStageKind(stage: RawDropStage): CollectionMintStage["kind"] {
+  const raw = parseStageString(stage, ["stage_type", "stageType", "type", "kind", "label"], "");
+  const normalized = raw.toLowerCase();
+
+  if (normalized.includes("public")) return "public";
+  if (normalized.includes("holder")) return "holder";
+  if (normalized.includes("white")) return "whitelist";
+  if (normalized.includes("allow") || normalized.includes("pre") || normalized.includes("signed")) {
+    return "allowlist";
+  }
+
+  return "allowlist";
+}
+
+function normalizeDropStages(data: unknown, slug: string): CollectionMintStage[] {
+  const payload = data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+  const nestedDrop =
+    payload["drop"] && typeof payload["drop"] === "object"
+      ? (payload["drop"] as Record<string, unknown>)
+      : {};
+  const rawStages = Array.isArray(payload["stages"])
+    ? payload["stages"]
+    : Array.isArray(nestedDrop["stages"])
+      ? nestedDrop["stages"]
+      : [];
+
+  return rawStages
+    .filter((stage): stage is RawDropStage => !!stage && typeof stage === "object")
+    .map((stage, index) => {
+      const stageType = parseStageString(
+        stage,
+        ["stage_type", "stageType", "type", "kind"],
+        "Mint Stage",
+      );
+      const label = parseStageString(stage, ["label", "name", "title"], stageType);
+      const startsAt =
+        parseStageTimestamp(
+          readStageValue(stage, ["start_time", "startTime", "starts_at", "startsAt"]),
+        ) ?? Date.now();
+      const endsAt = parseStageTimestamp(
+        readStageValue(stage, ["end_time", "endTime", "ends_at", "endsAt"]),
+      );
+      const maxPerWallet =
+        Math.max(
+          1,
+          Math.floor(
+            parseStageNumber(
+              readStageValue(stage, [
+                "max_per_wallet",
+                "maxPerWallet",
+                "max_mints_per_wallet",
+                "maxMintsPerWallet",
+                "walletLimit",
+              ]),
+            ) ?? 1,
+          ),
+        ) || 1;
+      const eligibleWalletsCount = parseStageNumber(
+        readStageValue(stage, [
+          "eligibleWalletsCount",
+          "eligible_wallets_count",
+          "eligibleWalletCount",
+          "eligible_wallet_count",
+        ]),
+      );
+
+      return {
+        id: parseStageString(stage, ["uuid", "id", "stage_id", "stageId"], `${slug}-${index}`),
+        name: label.toUpperCase(),
+        kind: parseStageKind(stage),
+        priceEth: parseStagePriceEth(readStageValue(stage, ["price", "mintPrice", "priceEth"])),
+        maxPerWallet,
+        startsAt,
+        ...(endsAt !== undefined ? { endsAt } : {}),
+        ...(eligibleWalletsCount !== undefined
+          ? { eligibleWalletsCount: Math.max(0, Math.floor(eligibleWalletsCount)) }
+          : {}),
+        source: "opensea" as const,
+        sourceLabel: "OpenSea Drop API",
+      };
+    })
+    .sort((a, b) => a.startsAt - b.startsAt);
+}
+
+function normalizeEligibilityKey(value: string | undefined): string {
+  return (value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function isRestrictedStage(stage: CollectionMintStage): boolean {
+  return stage.kind !== "public";
+}
+
+function isStageActiveForEligibility(stage: CollectionMintStage): boolean {
+  const now = Date.now();
+  return stage.startsAt <= now && (!stage.endsAt || stage.endsAt > now);
+}
+
+function matchesStageEligibility(
+  stage: CollectionMintStage,
+  item: DropStageEligibilityItem,
+): boolean {
+  const stageId = normalizeEligibilityKey(stage.id);
+  const itemId = normalizeEligibilityKey(item.stageId);
+  const stageName = normalizeEligibilityKey(stage.name);
+  const itemName = normalizeEligibilityKey(item.stageName);
+
+  if (itemId && itemId === stageId) return true;
+  if (itemName && itemName === stageName) return true;
+  if (itemName && stageName.includes(itemName)) return true;
+  if (stageName && itemName.includes(stageName)) return true;
+
+  return false;
+}
+
+function summarizeOpenSeaEligibility(
+  stages: CollectionMintStage[],
+  wallets: DropWalletEligibilityResult[],
+): Record<string, StageEligibilitySummary> {
+  const summaries: Record<string, StageEligibilitySummary> = {};
+
+  for (const stage of stages) {
+    if (!isRestrictedStage(stage)) continue;
+
+    let eligibleCount = 0;
+    let checkedCount = 0;
+    let matchedUnknown = 0;
+    const reasons: string[] = [];
+
+    for (const wallet of wallets) {
+      const match = (wallet.stageEligibilities ?? []).find((item) =>
+        matchesStageEligibility(stage, item),
+      );
+      if (!match) continue;
+
+      if (match.reason && !reasons.includes(match.reason)) {
+        reasons.push(match.reason);
+      }
+      if (match.eligible === null) {
+        matchedUnknown += 1;
+        continue;
+      }
+
+      checkedCount += 1;
+      if (match.eligible) eligibleCount += 1;
+    }
+
+    if (checkedCount > 0 || matchedUnknown > 0) {
+      summaries[stage.id] = {
+        status: eligibleCount > 0 ? "verified" : checkedCount > 0 ? "ineligible" : "unknown",
+        eligibleCount,
+        checkedCount,
+        detail:
+          reasons[0] ||
+          (eligibleCount > 0
+            ? "OpenSea confirmed wallet eligibility for this phase."
+            : checkedCount > 0
+              ? "OpenSea checked this phase and found no eligible imported wallets."
+              : "OpenSea returned this phase but did not expose wallet-specific proof."),
+        sourceLabel: "OpenSea eligibility",
+      };
+    }
+  }
+
+  const activeRestrictedStages = stages.filter(
+    (stage) => isRestrictedStage(stage) && isStageActiveForEligibility(stage),
+  );
+  const activeStage = activeRestrictedStages.length === 1 ? activeRestrictedStages[0] : undefined;
+
+  if (activeStage && !summaries[activeStage.id]) {
+    const eligibleCount = wallets.filter((wallet) => wallet.eligible === true).length;
+    const ineligibleCount = wallets.filter(
+      (wallet) => wallet.status === "ineligible" || wallet.eligible === false,
+    ).length;
+    const notActiveCount = wallets.filter((wallet) => wallet.status === "not_active").length;
+    const checkedCount = eligibleCount + ineligibleCount;
+    const firstReason = wallets.find((wallet) => wallet.reason)?.reason;
+
+    if (eligibleCount > 0) {
+      summaries[activeStage.id] = {
+        status: "verified",
+        eligibleCount,
+        checkedCount: wallets.length,
+        detail: firstReason || "OpenSea built a mint transaction for this wallet.",
+        sourceLabel: "OpenSea mint check",
+      };
+    } else if (ineligibleCount > 0 && ineligibleCount === wallets.length) {
+      summaries[activeStage.id] = {
+        status: "ineligible",
+        eligibleCount: 0,
+        checkedCount,
+        detail: firstReason || "OpenSea could not build a mint transaction for these wallets.",
+        sourceLabel: "OpenSea mint check",
+      };
+    } else if (notActiveCount > 0 && notActiveCount === wallets.length) {
+      summaries[activeStage.id] = {
+        status: "not_active",
+        eligibleCount: 0,
+        checkedCount: wallets.length,
+        detail: firstReason || "OpenSea says this phase is not active for minting yet.",
+        sourceLabel: "OpenSea mint check",
+      };
+    }
+  }
+
+  return summaries;
+}
+
+function getEligibilityDisplay(
+  stage: CollectionMintStage,
+  walletCount: number,
+  openSeaSummary?: StageEligibilitySummary,
+  isChecking = false,
+): EligibilityDisplay {
+  if (walletCount === 0) {
+    return {
+      label: "0",
+      detail: "No imported wallets",
+      labelClass: "text-muted-foreground",
+      pillClass: "border-border/60 bg-card",
+      requiresVerification: false,
+    };
+  }
+
+  if (openSeaSummary?.status === "verified") {
+    return {
+      label: `${openSeaSummary.eligibleCount}/${walletCount}`,
+      detail: openSeaSummary.detail,
+      labelClass: "text-emerald-400",
+      pillClass: "border-emerald-500/30 bg-emerald-500/10",
+      requiresVerification: false,
+    };
+  }
+
+  if (openSeaSummary?.status === "ineligible") {
+    return {
+      label: "0",
+      detail: openSeaSummary.detail,
+      labelClass: "text-rose-400",
+      pillClass: "border-rose-500/30 bg-rose-500/10",
+      requiresVerification: false,
+      warning: "OpenSea checked the imported wallets and did not find eligibility for this phase.",
+    };
+  }
+
+  if (openSeaSummary?.status === "not_active") {
+    return {
+      label: "Not active",
+      detail: openSeaSummary.detail,
+      labelClass: "text-muted-foreground",
+      pillClass: "border-border/60 bg-card",
+      requiresVerification: false,
+    };
+  }
+
+  if (openSeaSummary?.status === "error") {
+    return {
+      label: "Check failed",
+      detail: openSeaSummary.detail,
+      labelClass: "text-amber-400",
+      pillClass: "border-amber-500/30 bg-amber-500/10",
+      requiresVerification: true,
+      warning: "OpenSea could not verify wallet eligibility for this phase.",
+    };
+  }
+
+  if (openSeaSummary?.status === "unknown") {
+    return {
+      label: "Unverified",
+      detail: openSeaSummary.detail,
+      labelClass: "text-amber-400",
+      pillClass: "border-amber-500/30 bg-amber-500/10",
+      requiresVerification: true,
+      warning: openSeaSummary.detail,
+    };
+  }
+
+  if (stage.kind === "public") {
+    return {
+      label: String(walletCount),
+      detail: "Public phase",
+      labelClass: "text-emerald-400",
+      pillClass: "border-emerald-500/30 bg-emerald-500/10",
+      requiresVerification: false,
+    };
+  }
+
+  if (isChecking) {
+    return {
+      label: "Checking...",
+      detail: "Checking imported wallets with OpenSea",
+      labelClass: "text-amber-400",
+      pillClass: "border-amber-500/30 bg-amber-500/10",
+      requiresVerification: false,
+    };
+  }
+
+  if (typeof stage.eligibleWalletsCount === "number") {
+    return {
+      label: String(stage.eligibleWalletsCount),
+      detail: "Source-reported allowlist size",
+      labelClass: stage.eligibleWalletsCount > 0 ? "text-emerald-400" : "text-rose-400",
+      pillClass:
+        stage.eligibleWalletsCount > 0
+          ? "border-emerald-500/30 bg-emerald-500/10"
+          : "border-rose-500/30 bg-rose-500/10",
+      requiresVerification: true,
+      warning: "This is the phase allowlist size, not wallet-specific verification.",
+    };
+  }
+
+  return {
+    label: "Unverified",
+    detail: "Allowlist proof required",
+    labelClass: "text-amber-400",
+    pillClass: "border-amber-500/30 bg-amber-500/10",
+    requiresVerification: true,
+    warning:
+      "Imported wallets are valid, but OpenSea has not confirmed allowlist proof for this phase.",
+  };
+}
+
 export function MintScheduleModal({
   open,
   onOpenChange,
@@ -76,7 +506,8 @@ export function MintScheduleModal({
       setSelectedStage(null);
       setContractDetails(null);
       if (isValidEvmAddress(activeCollection.contractAddress)) {
-        queryOnChainContract(activeCollection.contractAddress)
+        const chain = getChainById(activeCollection.chain || "ethereum");
+        queryOnChainContract(activeCollection.contractAddress, chain.chainId)
           .then(setContractDetails)
           .catch(() => {});
       }
@@ -86,12 +517,19 @@ export function MintScheduleModal({
   const [stages, setStages] = useState<CollectionMintStage[]>([]);
   const [isLoadingStages, setIsLoadingStages] = useState(false);
   const [stageLoadError, setStageLoadError] = useState<string | null>(null);
+  const [stageEligibility, setStageEligibility] = useState<Record<string, StageEligibilitySummary>>(
+    {},
+  );
+  const [isCheckingEligibility, setIsCheckingEligibility] = useState(false);
+  const [eligibilityError, setEligibilityError] = useState<string | null>(null);
 
   // Reset or load stages when activeCollection changes
   useEffect(() => {
     if (!activeCollection) {
       setStages([]);
       setStageLoadError(null);
+      setStageEligibility({});
+      setEligibilityError(null);
       return;
     }
 
@@ -99,74 +537,69 @@ export function MintScheduleModal({
     const loadStages = async () => {
       setStages([]);
       setStageLoadError(null);
+      setStageEligibility({});
+      setEligibilityError(null);
+      setIsLoadingStages(true);
 
       const slug = activeCollection.slug || "";
-      if (!slug || isValidEvmAddress(slug) || activeCollection.collection === "custom") {
-        setIsLoadingStages(false);
-        setStageLoadError(
-          "No live drop metadata was found for this contract. Add a verified phase manually before scheduling.",
-        );
-        return;
-      }
+      const chain = getChainById(activeCollection.chain || "ethereum");
+      const canQueryOpenSeaDrop =
+        !!slug && !isValidEvmAddress(slug) && activeCollection.collection !== "custom";
 
-      setIsLoadingStages(true);
       try {
-        const res = await fetch(`/api/opensea/drop?slug=${encodeURIComponent(slug)}`);
-        if (!res.ok) throw new Error("Drop not found on OpenSea API");
-        const data = await res.json();
-        if (isMounted && data && Array.isArray(data.stages) && data.stages.length > 0) {
-          const mapped: CollectionMintStage[] = data.stages.map(
-            (
-              st: {
-                uuid?: string;
-                label?: string;
-                stage_type?: string;
-                price?: string;
-                max_per_wallet?: string;
-                start_time?: string;
-                end_time?: string;
-              },
-              index: number,
-            ) => {
-              let kind: "public" | "whitelist" | "allowlist" | "holder" = "allowlist";
-              if (st.stage_type === "public_sale") {
-                kind = "public";
-              } else if (st.stage_type === "signed_presale" || st.stage_type === "allowlist") {
-                kind = "allowlist";
-              }
+        if (canQueryOpenSeaDrop) {
+          const res = await fetch(`/api/opensea/drop?slug=${encodeURIComponent(slug)}`);
+          if (res.ok) {
+            const data = await res.json();
+            const mapped = normalizeDropStages(data, slug);
+            if (isMounted && mapped.length > 0) {
+              setStages(mapped);
+              setIsLoadingStages(false);
+              return;
+            }
+          }
+        }
 
-              const price = parseFloat(st.price || "0") || 0;
-              const startsAt = st.start_time ? Date.parse(st.start_time) : Date.now();
-              const endsAt = st.end_time ? Date.parse(st.end_time) : undefined;
+        if (isValidEvmAddress(activeCollection.contractAddress)) {
+          const params = new URLSearchParams({
+            address: activeCollection.contractAddress,
+            chainId: String(chain.chainId),
+          });
+          const res = await fetch(`/api/contract/mint-stages?${params.toString()}`);
+          if (res.ok) {
+            const data = (await res.json()) as { stages?: CollectionMintStage[] };
+            const contractStages = (data.stages ?? []).filter(
+              (stage) =>
+                typeof stage.name === "string" &&
+                typeof stage.priceEth === "number" &&
+                typeof stage.maxPerWallet === "number" &&
+                typeof stage.startsAt === "number",
+            );
+            if (isMounted && contractStages.length > 0) {
+              setStages(contractStages);
+              setIsLoadingStages(false);
+              return;
+            }
+          }
+        }
 
-              return {
-                id: st.uuid || `${slug}-${index}`,
-                name: (st.label || st.stage_type || "Mint Stage").toUpperCase(),
-                kind,
-                priceEth: price,
-                maxPerWallet: parseInt(st.max_per_wallet || "1") || 1,
-                startsAt: Number.isFinite(startsAt) ? startsAt : Date.now(),
-                ...(endsAt && Number.isFinite(endsAt) ? { endsAt } : {}),
-              };
-            },
+        if (isMounted) {
+          setStages([]);
+          setStageLoadError(
+            "No OpenSea Drop stages or supported on-chain mint phase were found. Add a verified phase manually if you have the live mint details.",
           );
-
-          // Sort stages chronologically
-          mapped.sort((a, b) => a.startsAt - b.startsAt);
-          setStages(mapped);
           setIsLoadingStages(false);
           return;
         }
       } catch (err) {
         console.warn("Failed to fetch live stages:", err);
-      }
-
-      if (isMounted) {
-        setStages([]);
-        setStageLoadError(
-          "OpenSea did not return active drop stages for this collection. Add a verified phase manually if you have the live mint details.",
-        );
-        setIsLoadingStages(false);
+        if (isMounted) {
+          setStages([]);
+          setStageLoadError(
+            "Live stage lookup failed. Add a verified phase manually if you have the mint details from the project or contract.",
+          );
+          setIsLoadingStages(false);
+        }
       }
     };
 
@@ -176,6 +609,102 @@ export function MintScheduleModal({
       isMounted = false;
     };
   }, [activeCollection]);
+
+  const walletAddressesKey = wallets
+    .map((wallet) => wallet.address)
+    .filter(isValidEvmAddress)
+    .join(",");
+
+  useEffect(() => {
+    if (!open || !activeCollection || stages.length === 0 || !walletAddressesKey) {
+      setStageEligibility({});
+      setEligibilityError(null);
+      setIsCheckingEligibility(false);
+      return;
+    }
+
+    const restrictedStages = stages.filter(isRestrictedStage);
+    const slug = activeCollection.slug || activeCollection.collection || "";
+    const canCheckOpenSeaDrop =
+      restrictedStages.length > 0 &&
+      !!slug &&
+      !isValidEvmAddress(slug) &&
+      activeCollection.collection !== "custom";
+
+    if (!canCheckOpenSeaDrop) {
+      setStageEligibility({});
+      setEligibilityError(null);
+      setIsCheckingEligibility(false);
+      return;
+    }
+
+    const walletAddressList = walletAddressesKey.split(",").filter(Boolean);
+    const safeQuantity = Math.min(100, Math.max(1, Math.floor(quantity) || 1));
+    let isMounted = true;
+
+    const checkEligibility = async () => {
+      setIsCheckingEligibility(true);
+      setEligibilityError(null);
+      setStageEligibility({});
+
+      try {
+        const res = await fetch("/api/opensea/drop/eligibility", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            slug,
+            wallets: walletAddressList,
+            quantity: safeQuantity,
+          }),
+        });
+        const data = (await res.json().catch(() => ({}))) as DropEligibilityResponse;
+
+        if (!res.ok) {
+          throw new Error(data.error || `OpenSea eligibility check returned ${res.status}`);
+        }
+
+        const walletResults = data.wallets ?? [];
+        const summaries = summarizeOpenSeaEligibility(stages, walletResults);
+
+        if (!isMounted) return;
+        setStageEligibility(summaries);
+
+        const hasUsableSummary = Object.keys(summaries).length > 0;
+        const statuses = new Set(walletResults.map((wallet) => wallet.status));
+        if (!hasUsableSummary && statuses.has("auth_error")) {
+          setEligibilityError(
+            "OpenSea rejected the eligibility request. Check the API key or wallet-scoped eligibility permissions.",
+          );
+        } else if (!hasUsableSummary && statuses.has("drop_not_found")) {
+          setEligibilityError("OpenSea did not find an active drop for this collection slug.");
+        } else if (!hasUsableSummary && statuses.has("not_active")) {
+          setEligibilityError(
+            "OpenSea says minting is not active right now, so wallet eligibility cannot be confirmed yet.",
+          );
+        } else if (!hasUsableSummary && walletResults.length > 0) {
+          setEligibilityError(
+            "OpenSea did not expose wallet-specific allowlist proof for these phases.",
+          );
+        }
+      } catch (err: unknown) {
+        if (!isMounted) return;
+        setStageEligibility({});
+        setEligibilityError(
+          err instanceof Error ? err.message : "OpenSea eligibility check failed",
+        );
+      } finally {
+        if (isMounted) {
+          setIsCheckingEligibility(false);
+        }
+      }
+    };
+
+    checkEligibility();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [activeCollection, open, quantity, stages, walletAddressesKey]);
 
   // Stage inline editor states
   const [editingStageId, setEditingStageId] = useState<string | null>(null);
@@ -243,6 +772,8 @@ export function MintScheduleModal({
       priceEth: 0,
       maxPerWallet: 1,
       startsAt: nowTimestamp,
+      source: "manual",
+      sourceLabel: "Manual verification",
     };
     setStages([...stages, newStage]);
     startEditing(newStage);
@@ -566,6 +1097,20 @@ export function MintScheduleModal({
               </div>
             )}
 
+            {isCheckingEligibility && (
+              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs flex items-center gap-2">
+                <Loader2 className="size-4 shrink-0 animate-spin" />
+                <span>Checking imported wallets against OpenSea eligibility...</span>
+              </div>
+            )}
+
+            {eligibilityError && !isCheckingEligibility && (
+              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs flex items-start gap-2">
+                <AlertTriangle className="size-4 shrink-0 mt-0.5" />
+                <span>{eligibilityError}</span>
+              </div>
+            )}
+
             {/* Mint Stages / Phases List */}
             <div className="flex flex-col gap-4">
               <div className="flex items-center justify-between">
@@ -615,8 +1160,12 @@ export function MintScheduleModal({
                   const countdown = formatCountdown(stage.startsAt);
                   const isEnded = isStageEnded(stage);
                   const isLive = countdown === "Live Now";
-                  const eligibleCount =
-                    wallets.length > 0 ? (stage.kind === "public" ? wallets.length : 0) : 0;
+                  const eligibility = getEligibilityDisplay(
+                    stage,
+                    wallets.length,
+                    stageEligibility[stage.id],
+                    isCheckingEligibility,
+                  );
 
                   if (editingStageId === stage.id) {
                     return (
@@ -779,27 +1328,39 @@ export function MintScheduleModal({
                             />
                           </div>
 
-                          <div className="inline-flex items-center gap-1.5 rounded-lg bg-card border border-border/60 px-2.5 py-1 font-mono">
+                          <div
+                            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 font-mono ${eligibility.pillClass}`}
+                            title={eligibility.detail}
+                          >
                             <span className="text-[10px] text-muted-foreground font-sans font-semibold">
-                              ELIGIBLE •
+                              ELIGIBILITY •
                             </span>
-                            <span
-                              className={`font-bold ${
-                                eligibleCount > 0 ? "text-emerald-400" : "text-rose-400"
-                              }`}
-                            >
-                              {eligibleCount}
+                            <span className={`font-bold ${eligibility.labelClass}`}>
+                              {eligibility.label}
                             </span>
                           </div>
 
                           <div className="inline-flex items-center gap-1 text-[11px] text-muted-foreground ml-auto">
                             <span>Max {stage.maxPerWallet}/wallet</span>
                           </div>
+
+                          {stage.sourceLabel && (
+                            <div className="inline-flex items-center gap-1 rounded-lg border border-border/60 bg-card px-2 py-1 text-[10px] font-semibold text-muted-foreground">
+                              <Shield className="size-3 text-primary" />
+                              <span>{stage.sourceLabel}</span>
+                            </div>
+                          )}
                         </div>
 
                         {/* If stage is selected: show configuration parameters */}
                         {isSelected && (
                           <div className="mt-2 pt-3 border-t border-border/60 flex flex-col gap-3 animate-in fade-in duration-150">
+                            {(eligibility.requiresVerification || eligibility.warning) && (
+                              <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[11px] leading-snug text-muted-foreground flex items-start gap-2">
+                                <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-400" />
+                                <span>{eligibility.warning || eligibility.detail}</span>
+                              </div>
+                            )}
                             <div className="grid grid-cols-2 gap-3">
                               <div className="flex flex-col gap-1">
                                 <label className="text-[11px] font-medium text-muted-foreground">

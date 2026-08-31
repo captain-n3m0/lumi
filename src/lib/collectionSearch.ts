@@ -11,6 +11,8 @@ export interface CollectionMintStage {
   startsAt: number;
   endsAt?: number;
   eligibleWalletsCount?: number;
+  source?: "opensea" | "contract" | "manual";
+  sourceLabel?: string;
 }
 
 export function parseCollectionUrlOrQuery(input: string): {
