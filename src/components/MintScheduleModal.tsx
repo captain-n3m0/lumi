@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import {
   X,
   Clock,
@@ -9,29 +9,22 @@ import {
   Loader2,
   ExternalLink,
   Copy,
-  Fuel,
   ArrowRight,
   Shield,
-  HelpCircle,
   Wallet,
   Pencil,
   Trash2,
   Plus,
 } from "lucide-react";
-import type { OpenSeaCollection } from "@/lib/opensea";
+import { isValidEvmAddress, type OpenSeaCollection } from "@/lib/opensea";
 import { addScheduledMint } from "@/lib/mintStore";
-import { useWeb3Wallet } from "@/lib/useWeb3Wallet";
 import { useManagedWallets } from "@/lib/walletStore";
 import { queryOnChainContract, type OnChainContractInfo } from "@/lib/rpc";
+import { getChainById } from "@/lib/chains";
 import { ChainIcon } from "@/components/icons/ChainIcons";
 import { PlatformIcon } from "@/components/icons/PlatformIcons";
-import {
-  getCollectionMintStages,
-  searchCollectionsUnified,
-  type CollectionMintStage,
-} from "@/lib/collectionSearch";
+import { searchCollectionsUnified, type CollectionMintStage } from "@/lib/collectionSearch";
 import { ImportWalletModal } from "@/components/ImportWalletModal";
-import type { Address } from "viem";
 
 interface MintScheduleModalProps {
   open: boolean;
@@ -52,8 +45,6 @@ export function MintScheduleModal({
   const [urlInput, setUrlInput] = useState("");
   const [isUrlSearching, setIsUrlSearching] = useState(false);
   const [showEnded, setShowEnded] = useState(false);
-  const [drainAddress, setDrainAddress] = useState("");
-  const [showDrainHelp, setShowDrainHelp] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
 
   // Selected stage for scheduling
@@ -63,14 +54,10 @@ export function MintScheduleModal({
   const [gasPriority, setGasPriority] = useState<"aggressive" | "normal" | "custom">("aggressive");
   const [success, setSuccess] = useState(false);
 
-  // Direct Web3 signing
-  const [isSigningDirect, setIsSigningDirect] = useState(false);
-  const [directTxHash, setDirectTxHash] = useState<string | null>(null);
   const [directError, setDirectError] = useState<string | null>(null);
   const [contractDetails, setContractDetails] = useState<OnChainContractInfo | null>(null);
   const [copiedContract, setCopiedContract] = useState(false);
 
-  const wallet = useWeb3Wallet();
   const { wallets } = useManagedWallets();
 
   // Keep collection in sync
@@ -85,10 +72,10 @@ export function MintScheduleModal({
   useEffect(() => {
     if (open && activeCollection) {
       setSuccess(false);
-      setDirectTxHash(null);
       setDirectError(null);
       setSelectedStage(null);
-      if (activeCollection.contractAddress) {
+      setContractDetails(null);
+      if (isValidEvmAddress(activeCollection.contractAddress)) {
         queryOnChainContract(activeCollection.contractAddress)
           .then(setContractDetails)
           .catch(() => {});
@@ -96,37 +83,51 @@ export function MintScheduleModal({
     }
   }, [open, activeCollection]);
 
-  // Generate mint stages
   const [stages, setStages] = useState<CollectionMintStage[]>([]);
   const [isLoadingStages, setIsLoadingStages] = useState(false);
+  const [stageLoadError, setStageLoadError] = useState<string | null>(null);
 
   // Reset or load stages when activeCollection changes
   useEffect(() => {
     if (!activeCollection) {
       setStages([]);
+      setStageLoadError(null);
       return;
     }
 
     let isMounted = true;
     const loadStages = async () => {
+      setStages([]);
+      setStageLoadError(null);
+
+      const slug = activeCollection.slug || "";
+      if (!slug || isValidEvmAddress(slug) || activeCollection.collection === "custom") {
+        setIsLoadingStages(false);
+        setStageLoadError(
+          "No live drop metadata was found for this contract. Add a verified phase manually before scheduling.",
+        );
+        return;
+      }
+
       setIsLoadingStages(true);
       try {
-        const res = await fetch(
-          `/api/opensea/drop?slug=${encodeURIComponent(activeCollection.slug || "")}`,
-        );
+        const res = await fetch(`/api/opensea/drop?slug=${encodeURIComponent(slug)}`);
         if (!res.ok) throw new Error("Drop not found on OpenSea API");
         const data = await res.json();
         if (isMounted && data && Array.isArray(data.stages) && data.stages.length > 0) {
           const mapped: CollectionMintStage[] = data.stages.map(
-            (st: {
-              uuid?: string;
-              label?: string;
-              stage_type?: string;
-              price?: string;
-              max_per_wallet?: string;
-              start_time?: string;
-              end_time?: string;
-            }) => {
+            (
+              st: {
+                uuid?: string;
+                label?: string;
+                stage_type?: string;
+                price?: string;
+                max_per_wallet?: string;
+                start_time?: string;
+                end_time?: string;
+              },
+              index: number,
+            ) => {
               let kind: "public" | "whitelist" | "allowlist" | "holder" = "allowlist";
               if (st.stage_type === "public_sale") {
                 kind = "public";
@@ -135,15 +136,17 @@ export function MintScheduleModal({
               }
 
               const price = parseFloat(st.price || "0") || 0;
+              const startsAt = st.start_time ? Date.parse(st.start_time) : Date.now();
+              const endsAt = st.end_time ? Date.parse(st.end_time) : undefined;
 
               return {
-                id: st.uuid || `os-${Math.random().toString(36).slice(2, 6)}`,
+                id: st.uuid || `${slug}-${index}`,
                 name: (st.label || st.stage_type || "Mint Stage").toUpperCase(),
                 kind,
                 priceEth: price,
                 maxPerWallet: parseInt(st.max_per_wallet || "1") || 1,
-                startsAt: st.start_time ? new Date(st.start_time).getTime() : Date.now(),
-                endsAt: st.end_time ? new Date(st.end_time).getTime() : undefined,
+                startsAt: Number.isFinite(startsAt) ? startsAt : Date.now(),
+                ...(endsAt && Number.isFinite(endsAt) ? { endsAt } : {}),
               };
             },
           );
@@ -155,12 +158,14 @@ export function MintScheduleModal({
           return;
         }
       } catch (err) {
-        console.warn("Failed to fetch live stages, using fallback:", err);
+        console.warn("Failed to fetch live stages:", err);
       }
 
-      // Fallback
       if (isMounted) {
-        setStages(getCollectionMintStages(activeCollection.name, activeCollection.slug));
+        setStages([]);
+        setStageLoadError(
+          "OpenSea did not return active drop stages for this collection. Add a verified phase manually if you have the live mint details.",
+        );
         setIsLoadingStages(false);
       }
     };
@@ -232,12 +237,12 @@ export function MintScheduleModal({
   const handleAddStage = () => {
     const nowTimestamp = Date.now();
     const newStage: CollectionMintStage = {
-      id: `custom-${nowTimestamp}-${Math.random().toString(36).slice(2, 6)}`,
-      name: "NEW PHASE",
+      id: `manual-${nowTimestamp}`,
+      name: "MANUAL PHASE",
       kind: "public",
-      priceEth: 0.01,
-      maxPerWallet: 5,
-      startsAt: nowTimestamp + 3600 * 1000, // starts in 1 hour
+      priceEth: 0,
+      maxPerWallet: 1,
+      startsAt: nowTimestamp,
     };
     setStages([...stages, newStage]);
     startEditing(newStage);
@@ -257,6 +262,7 @@ export function MintScheduleModal({
     if (!urlInput.trim()) return;
 
     setIsUrlSearching(true);
+    setDirectError(null);
     try {
       const results = await searchCollectionsUnified(urlInput.trim());
       const firstResult = results[0];
@@ -264,7 +270,11 @@ export function MintScheduleModal({
         setActiveCollection(firstResult);
         if (onSelectCollection) onSelectCollection(firstResult);
         setSelectedStage(null);
+      } else {
+        setDirectError("No live collection or on-chain contract was found for that input.");
       }
+    } catch (err: unknown) {
+      setDirectError(err instanceof Error ? err.message : "Collection lookup failed");
     } finally {
       setIsUrlSearching(false);
     }
@@ -294,17 +304,29 @@ export function MintScheduleModal({
     if (!showEnded && isStageEnded(st)) return false;
     return true;
   });
+  const hasContractAddress = isValidEvmAddress(activeCollection.contractAddress);
+  const collectionChain = getChainById(activeCollection.chain || "ethereum");
 
   const handleCopyContract = () => {
-    if (!activeCollection?.contractAddress) return;
+    if (!hasContractAddress) return;
     navigator.clipboard.writeText(activeCollection.contractAddress);
     setCopiedContract(true);
     setTimeout(() => setCopiedContract(false), 2000);
   };
 
   const handleScheduleStage = (stage: CollectionMintStage) => {
+    setDirectError(null);
+    if (!hasContractAddress) {
+      setDirectError("Add a valid contract address before scheduling this mint.");
+      return;
+    }
+    if (wallets.length === 0) {
+      setDirectError("Import at least one wallet before scheduling an automated mint task.");
+      return;
+    }
+
     const scheduledTime = Math.max(Date.now() + 500, stage.startsAt);
-    const targetWallets = Math.min(walletsCount, Math.max(1, wallets.length));
+    const targetWallets = Math.min(Math.max(1, walletsCount), wallets.length);
 
     addScheduledMint({
       collectionName: `${activeCollection.name} — ${stage.name}`,
@@ -325,56 +347,16 @@ export function MintScheduleModal({
     }, 1200);
   };
 
-  const handleDirectSignAndMint = async (stage: CollectionMintStage) => {
-    if (!wallet.isConnected) {
-      await wallet.connectWallet();
-      return;
-    }
-
-    setIsSigningDirect(true);
-    setDirectError(null);
-
-    try {
-      const valueWei =
-        stage.priceEth > 0 ? BigInt(Math.floor(stage.priceEth * 1e18)) * BigInt(quantity) : 0n;
-
-      const txHash = await wallet.sendMintTransaction({
-        to: activeCollection.contractAddress as Address,
-        valueWei,
-      });
-
-      setDirectTxHash(txHash);
-
-      addScheduledMint({
-        collectionName: `${activeCollection.name} (${stage.name})`,
-        contractAddress: activeCollection.contractAddress,
-        chain: activeCollection.chain || "ethereum",
-        imageUrl: activeCollection.imageUrl,
-        stage: "Confirmed",
-        scheduledTime: Date.now(),
-        walletsCount: 1,
-        quantityPerWallet: quantity,
-        gasPriority: "aggressive",
-        txHash,
-      });
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Failed to sign & broadcast transaction";
-      setDirectError(message);
-    } finally {
-      setIsSigningDirect(false);
-    }
-  };
-
   const shortAddress = (addr: string) => {
-    if (!addr || addr.length < 10) return addr;
+    if (!addr || addr.length < 10) return "No contract";
     return `${addr.slice(0, 6)}...${addr.slice(-5)}`.toUpperCase();
   };
 
   const totalSupply = contractDetails?.totalSupply
-    ? Number(contractDetails.totalSupply)
-    : activeCollection.itemCount || 10000;
-  const mintedSupply = 0;
-  const supplyPercent = totalSupply > 0 ? Math.round((mintedSupply / totalSupply) * 100) : 0;
+    ? contractDetails.totalSupply.toString()
+    : activeCollection.itemCount > 0
+      ? activeCollection.itemCount.toLocaleString()
+      : null;
 
   return (
     <>
@@ -388,7 +370,7 @@ export function MintScheduleModal({
                   type="text"
                   value={urlInput}
                   onChange={(e) => setUrlInput(e.target.value)}
-                  placeholder="https://opensea.io/collection/evolastion"
+                  placeholder="OpenSea URL, launchpad URL, or 0x contract"
                   className="w-full rounded-xl border border-border bg-background px-3.5 py-2 text-xs sm:text-sm font-mono text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
                 />
               </div>
@@ -420,16 +402,19 @@ export function MintScheduleModal({
             {/* Hero Banner Card */}
             <div className="relative rounded-2xl overflow-hidden border border-border/80 bg-neutral-900 shadow-md">
               {/* Background Art / Landscape */}
-              <div className="h-32 sm:h-36 w-full relative bg-gradient-to-r from-amber-950/80 via-purple-950/80 to-stone-900">
-                <img
-                  src={
-                    activeCollection.imageUrl ||
-                    "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200&auto=format&fit=crop&q=80"
-                  }
-                  alt={activeCollection.name}
-                  className="w-full h-full object-cover opacity-45 mix-blend-luminosity blur-2xs"
-                  referrerPolicy="no-referrer"
-                />
+              <div className="h-32 sm:h-36 w-full relative bg-gradient-to-r from-zinc-950 via-slate-900 to-neutral-950">
+                {activeCollection.imageUrl ? (
+                  <img
+                    src={activeCollection.imageUrl}
+                    alt={activeCollection.name}
+                    className="w-full h-full object-cover opacity-45 mix-blend-luminosity blur-2xs"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <div className="grid h-full w-full place-items-center text-4xl font-black tracking-wider text-white/15">
+                    {activeCollection.name.slice(0, 2).toUpperCase()}
+                  </div>
+                )}
                 <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent" />
               </div>
 
@@ -438,15 +423,18 @@ export function MintScheduleModal({
                 <div className="flex items-end gap-3.5 min-w-0">
                   {/* Collection Avatar with Chain Icon badge */}
                   <div className="relative size-16 sm:size-20 rounded-2xl overflow-hidden border-2 border-white/20 shadow-xl shrink-0 bg-black">
-                    <img
-                      src={
-                        activeCollection.imageUrl ||
-                        "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=500&auto=format&fit=crop&q=80"
-                      }
-                      alt={activeCollection.name}
-                      className="w-full h-full object-cover"
-                      referrerPolicy="no-referrer"
-                    />
+                    {activeCollection.imageUrl ? (
+                      <img
+                        src={activeCollection.imageUrl}
+                        alt={activeCollection.name}
+                        className="w-full h-full object-cover"
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <div className="grid h-full w-full place-items-center bg-primary/20 text-sm font-black text-primary">
+                        {activeCollection.name.slice(0, 2).toUpperCase()}
+                      </div>
+                    )}
                     {/* Chain Badge on corner */}
                     <div className="absolute top-1.5 left-1.5 p-1 rounded-lg bg-black/70 backdrop-blur-xs border border-white/20">
                       <ChainIcon
@@ -464,6 +452,7 @@ export function MintScheduleModal({
                       <button
                         type="button"
                         onClick={handleCopyContract}
+                        disabled={!hasContractAddress}
                         className="flex items-center gap-1.5 rounded-lg bg-white/10 hover:bg-white/20 border border-white/15 px-2 py-0.5 text-[11px] font-mono text-white/90 transition cursor-pointer backdrop-blur-xs"
                       >
                         <span>{shortAddress(activeCollection.contractAddress)}</span>
@@ -473,33 +462,26 @@ export function MintScheduleModal({
                           <Copy className="size-3 text-white/70" />
                         )}
                       </button>
-                      <a
-                        href={`https://etherscan.io/address/${activeCollection.contractAddress}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-white/60 hover:text-white transition"
-                        title="View on Block Explorer"
-                      >
-                        <ExternalLink className="size-3.5" />
-                      </a>
+                      {hasContractAddress && (
+                        <a
+                          href={`${collectionChain.blockExplorer}/address/${activeCollection.contractAddress}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-white/60 hover:text-white transition"
+                          title="View on Block Explorer"
+                        >
+                          <ExternalLink className="size-3.5" />
+                        </a>
+                      )}
                     </div>
                   </div>
                 </div>
 
-                {/* Progress / Total Supply */}
+                {/* Contract Supply */}
                 <div className="hidden sm:flex flex-col items-end gap-1.5 pb-1">
                   <div className="rounded-lg bg-black/60 backdrop-blur-md px-3 py-1.5 border border-white/10 text-xs font-mono text-white/90">
-                    <span className="font-bold text-white">{supplyPercent}%</span>
-                    <span className="text-white/60 mx-1.5">•</span>
-                    <span>
-                      {mintedSupply}/{totalSupply}
-                    </span>
-                  </div>
-                  <div className="w-36 h-2 bg-white/20 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-gradient-to-r from-primary to-cyan-400 rounded-full transition-all"
-                      style={{ width: `${Math.max(2, supplyPercent)}%` }}
-                    />
+                    <span className="text-white/60 mr-1.5">Supply</span>
+                    <span className="font-bold text-white">{totalSupply ?? "Unavailable"}</span>
                   </div>
                 </div>
               </div>
@@ -507,19 +489,18 @@ export function MintScheduleModal({
 
             {/* Link to OpenSea */}
             <div className="flex items-center justify-end">
-              <a
-                href={
-                  activeCollection.openseaUrl ||
-                  `https://opensea.io/collection/${activeCollection.slug}`
-                }
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition"
-              >
-                <span>Open in</span>
-                <PlatformIcon platform="opensea" className="size-3.5" />
-                <span className="underline font-medium">opensea.io</span>
-              </a>
+              {activeCollection.openseaUrl && (
+                <a
+                  href={activeCollection.openseaUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition"
+                >
+                  <span>Open in</span>
+                  <PlatformIcon platform="opensea" className="size-3.5" />
+                  <span className="underline font-medium">opensea.io</span>
+                </a>
+              )}
             </div>
 
             {/* Wallet Status Warning Alert Banner */}
@@ -558,80 +539,25 @@ export function MintScheduleModal({
               </div>
             )}
 
-            {/* DRAIN ADDRESS & Show Ended Row */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-end">
-              {/* Drain Address */}
-              <div className="flex flex-col gap-1.5">
-                <div className="flex items-center justify-between text-xs font-semibold">
-                  <label
-                    htmlFor="drain-address-input"
-                    className="text-foreground tracking-wide uppercase text-[11px]"
-                  >
-                    Drain Address
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => setShowDrainHelp(!showDrainHelp)}
-                    className="text-primary hover:underline flex items-center gap-1 text-[11px] font-normal cursor-pointer"
-                  >
-                    <span>What's this?</span>
-                    <HelpCircle className="size-3" />
-                  </button>
-                </div>
-                <input
-                  id="drain-address-input"
-                  type="text"
-                  value={drainAddress}
-                  onChange={(e) => setDrainAddress(e.target.value)}
-                  placeholder="0x... (Recipient cold wallet)"
-                  className="w-full rounded-xl border border-border bg-muted/40 px-3 py-2 text-xs font-mono text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
-                />
-                {showDrainHelp && (
-                  <p className="text-[11px] text-muted-foreground bg-muted/60 p-2.5 rounded-lg border border-border/50 animate-in fade-in duration-150">
-                    If configured, all freshly minted NFTs will be immediately transferred/swept to
-                    this address to keep bot burner wallets clean and safeguard your assets.
-                  </p>
-                )}
-              </div>
-
-              {/* Show Ended Toggle */}
-              <div className="flex items-center justify-between sm:justify-end gap-3 pb-1">
-                <span className="text-xs text-muted-foreground font-medium">Show ended</span>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={showEnded}
-                  onClick={() => setShowEnded(!showEnded)}
-                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                    showEnded ? "bg-primary" : "bg-muted"
+            {/* Show Ended Toggle */}
+            <div className="flex items-center justify-end gap-3 pb-1">
+              <span className="text-xs text-muted-foreground font-medium">Show ended</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={showEnded}
+                onClick={() => setShowEnded(!showEnded)}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                  showEnded ? "bg-primary" : "bg-muted"
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block size-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                    showEnded ? "translate-x-5" : "translate-x-0"
                   }`}
-                >
-                  <span
-                    className={`pointer-events-none inline-block size-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
-                      showEnded ? "translate-x-5" : "translate-x-0"
-                    }`}
-                  />
-                </button>
-              </div>
+                />
+              </button>
             </div>
-
-            {/* Direct Tx Banner */}
-            {directTxHash && (
-              <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-mono flex items-center justify-between">
-                <span className="flex items-center gap-1.5">
-                  <PlatformIcon platform="etherscan" className="size-4" />
-                  Broadcasted: {directTxHash.slice(0, 8)}...{directTxHash.slice(-6)}
-                </span>
-                <a
-                  href={`https://etherscan.io/tx/${directTxHash}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline text-emerald-300"
-                >
-                  View Explorer
-                </a>
-              </div>
-            )}
 
             {directError && (
               <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs flex items-center gap-2">
@@ -664,10 +590,24 @@ export function MintScheduleModal({
                   </span>
                 </div>
               ) : filteredStages.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-8 text-center border border-dashed border-border rounded-2xl bg-muted/10">
-                  <span className="text-xs font-medium text-muted-foreground">
-                    No active mint stages found
-                  </span>
+                <div className="flex flex-col items-center justify-center gap-3 py-8 px-4 text-center border border-dashed border-border rounded-2xl bg-muted/10">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-xs font-semibold text-foreground">
+                      No live mint stages found
+                    </span>
+                    <span className="text-xs text-muted-foreground max-w-md">
+                      {stageLoadError ||
+                        "The connected data sources did not return phase metadata for this collection."}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAddStage}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-primary/20 bg-primary/5 px-3 py-1.5 text-xs font-bold text-primary transition-colors hover:bg-primary/10 cursor-pointer"
+                  >
+                    <Plus className="size-3.5" />
+                    <span>Add Verified Stage</span>
+                  </button>
                 </div>
               ) : (
                 filteredStages.map((stage) => {
@@ -807,12 +747,12 @@ export function MintScheduleModal({
                             </div>
                           </div>
 
-                          {/* Action Buttons: Schedule (Wallet) & Instant Mint (Fuel/Flash) */}
+                          {/* Action Buttons */}
                           <div className="flex items-center gap-2 shrink-0">
                             <button
                               type="button"
                               onClick={() => setSelectedStage(isSelected ? null : stage)}
-                              title="Configure multi-wallet scheduled sniper for this stage"
+                              title="Configure multi-wallet scheduled mint for this stage"
                               className={`size-9 rounded-xl border flex items-center justify-center transition cursor-pointer ${
                                 isSelected
                                   ? "bg-primary text-primary-foreground border-primary"
@@ -820,16 +760,6 @@ export function MintScheduleModal({
                               }`}
                             >
                               <Wallet className="size-4" />
-                            </button>
-
-                            <button
-                              type="button"
-                              disabled={isSigningDirect}
-                              onClick={() => handleDirectSignAndMint(stage)}
-                              title="Direct Web3 instant mint via connected wallet"
-                              className="size-9 rounded-xl border border-primary/40 bg-primary/10 hover:bg-primary/20 text-primary flex items-center justify-center transition cursor-pointer"
-                            >
-                              <Fuel className="size-4" />
                             </button>
                           </div>
                         </div>

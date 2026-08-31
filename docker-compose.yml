@@ -1,12 +1,9 @@
 services:
-  # ==========================================================
-  # Web App & Ingest Gateway (TanStack Start + Viem + RPC Engine)
-  # ==========================================================
   app:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: lumi_sniper_app
+    container_name: lumi_app
     restart: always
     ports:
       - "3000:3000"
@@ -14,15 +11,26 @@ services:
       - NODE_ENV=production
       - PORT=3000
       - HOST=0.0.0.0
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
       - OPENSEA_API_KEY=${OPENSEA_API_KEY:-}
-      - ETH_RPC_URL=${ETH_RPC_URL:-https://eth.llamarpc.com}
-      - BASE_RPC_URL=${BASE_RPC_URL:-https://mainnet.base.org}
-      - ARB_RPC_URL=${ARB_RPC_URL:-https://arb1.arbitrum.io/rpc}
-      - BLAST_RPC_URL=${BLAST_RPC_URL:-https://rpc.blast.io}
-    depends_on:
-      - redis
+      - ETH_RPC_URL=${ETH_RPC_URL:-}
+      - BASE_RPC_URL=${BASE_RPC_URL:-}
+      - ARB_RPC_URL=${ARB_RPC_URL:-}
+      - OPTIMISM_RPC_URL=${OPTIMISM_RPC_URL:-}
+      - POLYGON_RPC_URL=${POLYGON_RPC_URL:-}
+      - BLAST_RPC_URL=${BLAST_RPC_URL:-}
+      - BSC_RPC_URL=${BSC_RPC_URL:-}
+      - ZORA_RPC_URL=${ZORA_RPC_URL:-}
+      - AVALANCHE_RPC_URL=${AVALANCHE_RPC_URL:-}
+      - LINEA_RPC_URL=${LINEA_RPC_URL:-}
+      - SCROLL_RPC_URL=${SCROLL_RPC_URL:-}
+      - MANTLE_RPC_URL=${MANTLE_RPC_URL:-}
+      - MODE_RPC_URL=${MODE_RPC_URL:-}
+      - BERACHAIN_RPC_URL=${BERACHAIN_RPC_URL:-}
+      - APECHAIN_RPC_URL=${APECHAIN_RPC_URL:-}
+      - SEI_RPC_URL=${SEI_RPC_URL:-}
+      - INK_RPC_URL=${INK_RPC_URL:-}
+      - MONAD_RPC_URL=${MONAD_RPC_URL:-}
+      - SEPOLIA_RPC_URL=${SEPOLIA_RPC_URL:-}
     networks:
       - lumi_network
     deploy:
@@ -34,25 +42,6 @@ services:
           cpus: "0.50"
           memory: 512M
 
-  # ==========================================================
-  # Redis Queue Broker (BullMQ / In-Memory Task Scheduler)
-  # ==========================================================
-  redis:
-    image: redis:7-alpine
-    container_name: lumi_redis_queue
-    restart: always
-    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy noeviction
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    networks:
-      - lumi_network
-
 networks:
   lumi_network:
     driver: bridge
-
-volumes:
-  redis_data:
-    driver: local

@@ -1,17 +1,18 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import { useAccount, useConfig } from "wagmi";
-import { ChevronDown, Search, Check, AlertCircle, Sparkles, Activity } from "lucide-react";
-import { EVM_CHAINS, ChainInfo } from "@/lib/chains";
+import { ChevronDown, Search, Check, AlertCircle, Sparkles, Activity, Loader2 } from "lucide-react";
+import { EVM_CHAINS } from "@/lib/chains";
 import { useWallet } from "@/hooks/useWallet";
 
 export function ChainSelector() {
   const { isConnected, chainId: activeChainId } = useAccount();
   const { chains } = useConfig();
-  const { switchChain } = useWallet();
+  const { switchChain, connect, isConnecting } = useWallet();
 
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [pendingChainId, setPendingChainId] = useState<number | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -28,10 +29,9 @@ export function ChainSelector() {
 
   // Clear error message after 4 seconds
   useEffect(() => {
-    if (errorMsg) {
-      const t = setTimeout(() => setErrorMsg(null), 4000);
-      return () => clearTimeout(t);
-    }
+    if (!errorMsg) return undefined;
+    const t = setTimeout(() => setErrorMsg(null), 4000);
+    return () => clearTimeout(t);
   }, [errorMsg]);
 
   // Match Wagmi chains with our EVM_CHAINS configuration to enrich visual assets
@@ -82,23 +82,45 @@ export function ChainSelector() {
   }, [enrichedChains, searchQuery]);
 
   const handleSwitch = async (chainId: number) => {
-    if (chainId === activeChainId) {
+    if (isConnected && chainId === activeChainId) {
       setIsOpen(false);
       return;
     }
+
+    const action = isConnected ? "switch" : "connect";
     setErrorMsg(null);
+    setPendingChainId(chainId);
+
     try {
-      await switchChain(chainId);
+      if (action === "switch") {
+        await switchChain(chainId);
+      } else {
+        await connect(undefined, chainId);
+      }
       setIsOpen(false);
     } catch (err: unknown) {
-      console.warn("Switch chain failed:", err);
-      const msg = err instanceof Error ? err.message : "Switch rejected by wallet";
-      // Clean up common error messages
-      if (msg.includes("rejected") || msg.includes("User rejected")) {
-        setErrorMsg("Switch request rejected by wallet");
+      console.warn(`${action === "switch" ? "Switch chain" : "Connect wallet"} failed:`, err);
+      const msg =
+        err instanceof Error
+          ? err.message
+          : action === "switch"
+            ? "Switch rejected by wallet"
+            : "Connection rejected by wallet";
+      const lower = msg.toLowerCase();
+
+      if (lower.includes("rejected") || lower.includes("denied") || lower.includes("declined")) {
+        setErrorMsg(
+          action === "switch"
+            ? "Switch request rejected by wallet"
+            : "Connection request rejected by wallet",
+        );
+      } else if (lower.includes("no web3 wallet") || lower.includes("connector")) {
+        setErrorMsg("No wallet connector detected");
       } else {
-        setErrorMsg("Failed to switch network");
+        setErrorMsg(action === "switch" ? "Failed to switch network" : "Failed to connect wallet");
       }
+    } finally {
+      setPendingChainId(null);
     }
   };
 
@@ -111,9 +133,9 @@ export function ChainSelector() {
         className={`flex items-center gap-2 rounded-lg border px-2.5 py-1 text-xs font-semibold select-none transition cursor-pointer shadow-2xs ${
           activeChain
             ? "border-border/60 bg-muted/20 hover:bg-muted/40 text-foreground"
-            : "border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500"
+            : "border-border/60 bg-card hover:bg-muted text-muted-foreground"
         }`}
-        title="Toggle / Switch EVM Network"
+        title={isConnected ? "Switch EVM Network" : "Select EVM Network"}
       >
         {activeChain ? (
           <>
@@ -136,8 +158,8 @@ export function ChainSelector() {
           </>
         ) : (
           <>
-            <AlertCircle className="size-3 text-amber-500" />
-            <span>Connect Wallet / Select Chain</span>
+            <Sparkles className="size-3 text-primary" />
+            <span>Select Network</span>
           </>
         )}
         <ChevronDown
@@ -163,6 +185,13 @@ export function ChainSelector() {
             </div>
           </div>
 
+          {!isConnected && (
+            <div className="flex items-start gap-1.5 border-b border-primary/15 bg-primary/5 px-3 py-2 text-[11px] leading-snug text-muted-foreground">
+              <Sparkles className="mt-0.5 size-3.5 shrink-0 text-primary" />
+              <span>Choose a network, then approve the wallet connection on that chain.</span>
+            </div>
+          )}
+
           {/* Error notifications */}
           {errorMsg && (
             <div className="px-3 py-1.5 bg-destructive/10 border-b border-destructive/20 text-[11px] text-destructive-foreground flex items-center gap-1.5">
@@ -179,16 +208,19 @@ export function ChainSelector() {
               </div>
             ) : (
               filteredChains.map((c) => {
-                const isActive = activeChainId === c.id;
+                const isActive = isConnected && activeChainId === c.id;
+                const isPending = pendingChainId === c.id;
                 return (
                   <button
                     key={c.id}
                     type="button"
                     onClick={() => handleSwitch(c.id)}
-                    className={`w-full flex items-center justify-between rounded-lg px-2.5 py-2 text-left text-xs transition cursor-pointer select-none ${
+                    disabled={pendingChainId !== null || isConnecting}
+                    title={isConnected ? `Switch to ${c.name}` : `Connect wallet on ${c.name}`}
+                    className={`w-full flex items-center justify-between rounded-lg px-2.5 py-2 text-left text-xs transition select-none disabled:cursor-wait disabled:opacity-70 ${
                       isActive
                         ? "bg-primary/10 text-primary font-bold border border-primary/20 shadow-2xs"
-                        : "hover:bg-muted/80 text-muted-foreground hover:text-foreground border border-transparent"
+                        : "hover:bg-muted/80 text-muted-foreground hover:text-foreground border border-transparent cursor-pointer"
                     }`}
                   >
                     <div className="flex items-center gap-2.5">
@@ -205,12 +237,18 @@ export function ChainSelector() {
                     </div>
 
                     <div className="flex items-center gap-1">
-                      {c.testnet && (
-                        <span className="rounded bg-muted px-1 py-0.2 text-[9px] font-mono text-muted-foreground border border-border/80">
-                          Testnet
-                        </span>
+                      {isPending ? (
+                        <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" />
+                      ) : (
+                        <>
+                          {c.testnet && (
+                            <span className="rounded bg-muted px-1 py-0.2 text-[9px] font-mono text-muted-foreground border border-border/80">
+                              Testnet
+                            </span>
+                          )}
+                          {isActive && <Check className="size-3.5 text-primary shrink-0" />}
+                        </>
                       )}
-                      {isActive && <Check className="size-3.5 text-primary shrink-0" />}
                     </div>
                   </button>
                 );
@@ -221,7 +259,8 @@ export function ChainSelector() {
           {/* Quick status footer */}
           <div className="px-3 py-2 bg-muted/30 border-t border-border/60 text-[10px] text-muted-foreground flex items-center justify-between font-mono">
             <span className="flex items-center gap-1">
-              <Activity className="size-2.5 text-emerald-400" /> Live Synchronized
+              <Activity className="size-2.5 text-emerald-400" />
+              {isConnected ? "Live Synchronized" : "Wallet Required"}
             </span>
             <span>{enrichedChains.length} Active Configs</span>
           </div>

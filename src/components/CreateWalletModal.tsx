@@ -101,7 +101,7 @@ export function CreateWalletModal({
               type="text"
               value={namePrefix}
               onChange={(e) => setNamePrefix(e.target.value)}
-              placeholder="e.g. Sniper, Burner, Main"
+              placeholder="e.g. Mint, Funder, Main"
               className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none"
             />
             <p className="text-[11px] text-muted-foreground mt-1">

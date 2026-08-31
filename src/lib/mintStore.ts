@@ -41,7 +41,7 @@ function initFromStorage() {
       });
     }
   } catch {
-    // fallback
+    memoryMints = [];
   }
 }
 
@@ -179,8 +179,8 @@ export function addScheduledMint(mint: Omit<ScheduledMint, "id" | "logs">): Sche
           if (bytecode && bytecode !== "0x") {
             updateMintStage(
               newMint.id,
-              "Broadcasting Tx",
-              `[RPC] Contract verified on-chain at ${newMint.contractAddress}. Ready for wallet broadcast.`,
+              "Scheduled",
+              `[RPC] Contract verified on-chain at ${newMint.contractAddress}. Awaiting execution service.`,
             );
           } else {
             updateMintStage(

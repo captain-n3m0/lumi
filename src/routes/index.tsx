@@ -5,19 +5,20 @@ import { MintScheduleModal } from "@/components/MintScheduleModal";
 import { ScheduledMintsList } from "@/components/ScheduledMintsList";
 import { useScheduledMints } from "@/lib/mintStore";
 import { useManagedWallets } from "@/lib/walletStore";
+import { EVM_CHAINS } from "@/lib/chains";
 import type { OpenSeaCollection } from "@/lib/opensea";
 import { Zap, ShieldCheck, Plus, Sparkles, Clock } from "lucide-react";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Lumi — Multi-Chain NFT Mint Scheduler & Sniper" },
+      { title: "Lumi — Multi-Chain NFT Mint Scheduler" },
       {
         name: "description",
         content:
-          "High-speed automated multi-chain NFT mint scheduler, MEV protected gas execution, and mass wallet matrix in Lumi.",
+          "Live multi-chain NFT mint scheduler, on-chain contract validation, and wallet matrix in Lumi.",
       },
-      { property: "og:title", content: "Lumi — Multi-Chain NFT Mint Scheduler & Sniper" },
+      { property: "og:title", content: "Lumi — Multi-Chain NFT Mint Scheduler" },
       {
         property: "og:description",
         content: "Schedule mints, manage wallets, and disperse gas from one powerful terminal.",
@@ -42,7 +43,7 @@ function Mints() {
     setSelectedCollection({
       collection: "custom",
       name: "Custom Smart Contract Mint",
-      contractAddress: "0x",
+      contractAddress: "",
       chain: "ethereum",
       openseaUrl: "",
       imageUrl: "",
@@ -65,12 +66,12 @@ function Mints() {
                   Auto-Mint Command Terminal
                 </h1>
                 <span className="rounded-md bg-cyan-500/10 px-2 py-0.5 font-mono text-[10px] font-bold text-cyan-400 border border-cyan-500/20">
-                  MEV SHIELD ACTIVE
+                  LIVE RPC
                 </span>
               </div>
               <p className="text-xs text-muted-foreground">
-                Automate public drops, whitelist phases, and custom contract mints with
-                high-frequency execution across 18 chains.
+                Automate public drops, whitelist phases, and custom contract mints with live
+                contract validation across {EVM_CHAINS.length} chains.
               </p>
             </div>
 
@@ -111,8 +112,8 @@ function Mints() {
                 <ShieldCheck className="size-4" />
               </div>
               <div className="flex flex-col">
-                <span className="font-bold text-emerald-400 font-mono">Flashbots</span>
-                <span className="text-[10px] text-muted-foreground">Private Mempool</span>
+                <span className="font-bold text-emerald-400 font-mono">On-chain</span>
+                <span className="text-[10px] text-muted-foreground">Contract Checks</span>
               </div>
             </div>
 
@@ -121,7 +122,9 @@ function Mints() {
                 <Sparkles className="size-4" />
               </div>
               <div className="flex flex-col">
-                <span className="font-bold text-foreground font-mono">18 Nets</span>
+                <span className="font-bold text-foreground font-mono">
+                  {EVM_CHAINS.length} Nets
+                </span>
                 <span className="text-[10px] text-muted-foreground">Multi-Chain Engine</span>
               </div>
             </div>
@@ -129,7 +132,7 @@ function Mints() {
         </div>
 
         <Banner
-          text="Looking to snipe an upcoming launchpad drop or custom contract? Search below or enter any contract address."
+          text="Search live OpenSea data or enter a verified contract address before scheduling."
           actionLabel="View Support Docs"
         />
 

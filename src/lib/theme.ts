@@ -4,7 +4,7 @@ export type Theme = "dark" | "light";
 
 const THEME_KEY = "lumi_theme";
 
-// Default to dark mode for crypto/NFT sniper aesthetic
+// Default to dark mode for the crypto/NFT operator interface.
 function getInitialTheme(): Theme {
   if (typeof window === "undefined") return "dark";
   try {

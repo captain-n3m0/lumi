@@ -73,8 +73,9 @@ export async function planDisperseEther({
     const gasPrice = await client.getGasPrice();
     const gasUnits = BigInt(recipients.length * 28000 + 45000);
     estimatedGasWei = gasPrice * gasUnits;
-  } catch {
-    estimatedGasWei = parseEther("0.0008"); // safe fallback
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "RPC gas query failed";
+    throw new Error(`Unable to fetch live gas estimate for ${chain.name}: ${message}`);
   }
 
   return {
@@ -102,10 +103,6 @@ export async function executeDisperseEther({
 }): Promise<DisperseResult> {
   try {
     const account = privateKeyToAccount(senderPrivateKey);
-    const client = createPublicClient({
-      transport: http(chain.rpcUrls[0]),
-    });
-
     const walletClient = createWalletClient({
       account,
       chain: {

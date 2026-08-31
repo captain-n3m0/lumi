@@ -11,7 +11,7 @@
 
 import { redact, withEphemeralKeys, type VaultEntry } from "@/lib/crypto";
 import { getAdapter, type MintPhase } from "@/lib/launchpads";
-import { SUPPORTED_CHAINS } from "@/lib/rpc";
+import { getRpcClient, SUPPORTED_CHAINS } from "@/lib/rpc";
 import { createWalletClient, http, encodeFunctionData, parseAbi, type Address } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { purgeEphemeralVault } from "./ephemeralVault";
@@ -137,7 +137,8 @@ export async function processMintJob(job: Job<MintJobData>): Promise<MintJobResu
     );
     if (!phase) throw new Error(`No ${job.data.phase} phase available`);
 
-    const fees = resolveGasFees(gasConfig, phase.priceEth > 0 ? 20 : 20);
+    const gasPriceWei = await getRpcClient(chainId).getGasPrice();
+    const fees = resolveGasFees(gasConfig, Number(gasPriceWei) / 1e9);
 
     const result = await withEphemeralKeys(vault, async (entries) => {
       job.log("info", "Broadcasting Tx", `Broadcasting from ${entries.length} wallet(s)`);

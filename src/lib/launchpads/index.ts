@@ -68,30 +68,14 @@ function createAdapter(
     label,
     matches,
     fetchCollection: async (url: string) => {
-      const match = url.match(/0x[a-fA-F0-9]{40}/i);
-      const contractAddress = match ? match[0] : "0x0000000000000000000000000000000000000000";
-      return {
-        name: `${label} Collection`,
-        chainId: 1,
-        contractAddress,
-        phases: [
-          {
-            id: "public",
-            name: "Public Mint",
-            kind: "public",
-            priceEth: 0,
-            maxPerWallet: 5,
-            startsAt: Date.now(),
-          },
-        ],
-      };
+      throw new Error(`${label} live mint metadata is not implemented for ${url}`);
     },
-    checkWhitelist: async () => [],
-    buildMintPayload: async ({ quantity }) => ({
-      functionName: "mint",
-      args: [quantity],
-      valueWei: 0n,
-    }),
+    checkWhitelist: async () => {
+      throw new Error(`${label} whitelist checks are not implemented`);
+    },
+    buildMintPayload: async () => {
+      throw new Error(`${label} mint payload generation is not implemented`);
+    },
     ...overrides,
   };
 }

@@ -15,7 +15,6 @@ import {
   Loader2,
   Wallet,
   CheckCircle2,
-  Flame,
   Zap,
   Activity,
   Search,
@@ -23,11 +22,13 @@ import {
   Copy,
   Check,
   AlertTriangle,
+  ChevronDown,
 } from "lucide-react";
 import type { OpenSeaCollection } from "@/lib/opensea";
 import { searchCollectionsUnified } from "@/lib/collectionSearch";
 import { useWallet } from "@/hooks/useWallet";
 import { useTheme } from "@/lib/theme";
+import { EVM_CHAINS } from "@/lib/chains";
 import { useManagedWallets } from "@/lib/walletStore";
 import { useScheduledMints } from "@/lib/mintStore";
 import { ChainIcon } from "@/components/icons/ChainIcons";
@@ -107,6 +108,44 @@ const navItems = [
   { to: "/disperse", label: "Gas Disperse", icon: Send },
 ] as const;
 
+type WalletConnector = ReturnType<typeof useWallet>["connectors"][number];
+
+function connectorWalletType(connector?: WalletConnector): string {
+  const walletName = `${connector?.name ?? ""} ${connector?.id ?? ""}`.toLowerCase();
+
+  if (walletName.includes("rabby")) return "rabby";
+  if (walletName.includes("coinbase")) return "coinbase";
+  if (walletName.includes("walletconnect")) return "walletconnect";
+  if (walletName.includes("rainbow")) return "rainbow";
+  if (walletName.includes("phantom")) return "phantom";
+  if (walletName.includes("robinhood")) return "robinhood";
+  if (walletName.includes("metamask") || walletName.includes("io.metamask")) return "metamask";
+
+  return "wallet";
+}
+
+function connectorLabel(connector: WalletConnector): string {
+  if (connector.id === "injected" && connector.name.toLowerCase() === "injected") {
+    return "Browser wallet";
+  }
+  return connector.name || "Wallet";
+}
+
+function walletErrorMessage(error: unknown, fallback: string): string {
+  const message =
+    error instanceof Error ? error.message : typeof error === "string" ? error : fallback;
+  const lower = message.toLowerCase();
+
+  if (lower.includes("rejected") || lower.includes("denied") || lower.includes("declined")) {
+    return "Connection request rejected by wallet";
+  }
+  if (lower.includes("no web3 wallet") || lower.includes("connector")) {
+    return "No wallet connector detected";
+  }
+
+  return message || fallback;
+}
+
 export function UmiLayout({ children }: { children: ReactNode }) {
   return <LumiLayout>{children}</LumiLayout>;
 }
@@ -114,20 +153,120 @@ export function UmiLayout({ children }: { children: ReactNode }) {
 export function LumiLayout({ children }: { children: ReactNode }) {
   const [usd, setUsd] = useState(false);
   const [calcOpen, setCalcOpen] = useState(false);
-  const [calcGasGwei, setCalcGasGwei] = useState("18");
-  const [calcEthPrice, setCalcEthPrice] = useState("3180");
+  const [calcGasGwei, setCalcGasGwei] = useState("");
+  const [calcEthPrice, setCalcEthPrice] = useState("");
+  const [telemetryLoading, setTelemetryLoading] = useState(true);
   const [copiedAddr, setCopiedAddr] = useState(false);
   const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
+  const [walletMenuOpen, setWalletMenuOpen] = useState(false);
+  const [walletConnectError, setWalletConnectError] = useState<string | null>(null);
+  const walletMenuRef = useRef<HTMLDivElement>(null);
   const { isDark, toggleTheme } = useTheme();
   const wallet = useWallet();
   const { wallets } = useManagedWallets();
   const [scheduledMints] = useScheduledMints();
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadTelemetry() {
+      try {
+        const [gasRes, priceRes] = await Promise.all([
+          fetch("/api/gas?chainId=1"),
+          fetch("/api/market/eth-usd"),
+        ]);
+
+        if (gasRes.ok) {
+          const gasData = (await gasRes.json()) as {
+            gas?: Array<{ chainId: number; gasPriceGwei?: number | null; status: string }>;
+          };
+          const ethGas = gasData.gas?.find((item) => item.chainId === 1);
+          if (isMounted) {
+            setCalcGasGwei(
+              ethGas?.status === "live" && typeof ethGas.gasPriceGwei === "number"
+                ? String(ethGas.gasPriceGwei)
+                : "",
+            );
+          }
+        }
+
+        if (priceRes.ok) {
+          const priceData = (await priceRes.json()) as { priceUsd?: number };
+          if (isMounted) {
+            setCalcEthPrice(
+              typeof priceData.priceUsd === "number" ? priceData.priceUsd.toFixed(2) : "",
+            );
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to load live telemetry:", err);
+        if (isMounted) {
+          setCalcGasGwei("");
+          setCalcEthPrice("");
+        }
+      } finally {
+        if (isMounted) {
+          setTelemetryLoading(false);
+        }
+      }
+    }
+
+    loadTelemetry();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    function handleWalletMenuOutside(event: MouseEvent) {
+      if (walletMenuRef.current && !walletMenuRef.current.contains(event.target as Node)) {
+        setWalletMenuOpen(false);
+      }
+    }
+
+    if (!walletMenuOpen) return undefined;
+    document.addEventListener("mousedown", handleWalletMenuOutside);
+    return () => document.removeEventListener("mousedown", handleWalletMenuOutside);
+  }, [walletMenuOpen]);
+
+  useEffect(() => {
+    if (wallet.isConnected) {
+      setWalletMenuOpen(false);
+      setWalletConnectError(null);
+    }
+  }, [wallet.isConnected]);
 
   const copyAddress = () => {
     if (!wallet.address) return;
     navigator.clipboard.writeText(wallet.address);
     setCopiedAddr(true);
     setTimeout(() => setCopiedAddr(false), 1500);
+  };
+
+  const formatFeeUsd = (gasUnits: number) => {
+    const gasGwei = Number.parseFloat(calcGasGwei);
+    const ethUsd = Number.parseFloat(calcEthPrice);
+    if (!Number.isFinite(gasGwei) || gasGwei <= 0 || !Number.isFinite(ethUsd) || ethUsd <= 0) {
+      return "--";
+    }
+
+    return `$${(gasUnits * gasGwei * 1e-9 * ethUsd).toFixed(3)}`;
+  };
+
+  const walletStatusError =
+    walletConnectError ||
+    (wallet.error ? walletErrorMessage(wallet.error, "Failed to connect wallet") : null);
+
+  const handleWalletConnect = async (connectorId?: string) => {
+    setWalletConnectError(null);
+    wallet.clearError();
+
+    try {
+      await wallet.connect(connectorId);
+      setWalletMenuOpen(false);
+    } catch (err: unknown) {
+      setWalletConnectError(walletErrorMessage(err, "Failed to connect wallet"));
+    }
   };
 
   return (
@@ -189,7 +328,7 @@ export function LumiLayout({ children }: { children: ReactNode }) {
             <div className="hidden lg:flex items-center gap-2 rounded-lg border border-border/60 bg-muted/30 px-2.5 py-1 text-xs">
               <span className="flex size-2 rounded-full bg-emerald-400 animate-pulse" />
               <span className="font-mono text-[11px] text-muted-foreground">
-                <span className="text-foreground font-semibold">18</span> EVM Nets
+                <span className="text-foreground font-semibold">{EVM_CHAINS.length}</span> EVM Nets
               </span>
               <span className="text-border">|</span>
               <button
@@ -198,8 +337,12 @@ export function LumiLayout({ children }: { children: ReactNode }) {
                 className="flex items-center gap-1 font-mono text-[11px] text-amber-500 hover:text-amber-400 transition cursor-pointer"
                 title="Open Gas Calculator"
               >
-                <Activity className="size-3" />
-                <span>~{calcGasGwei} Gwei</span>
+                {telemetryLoading ? (
+                  <Loader2 className="size-3 animate-spin" />
+                ) : (
+                  <Activity className="size-3" />
+                )}
+                <span>{calcGasGwei ? `~${calcGasGwei} Gwei` : "Gas unavailable"}</span>
               </button>
             </div>
 
@@ -241,7 +384,7 @@ export function LumiLayout({ children }: { children: ReactNode }) {
             {/* Web3 Wallet Connect */}
             {wallet.isConnected && wallet.address ? (
               <div className="flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs shadow-2xs">
-                <WalletIcon walletType={wallet.walletType || "metamask"} className="size-3.5" />
+                <WalletIcon walletType={wallet.walletType || "wallet"} className="size-3.5" />
                 <button
                   type="button"
                   onClick={copyAddress}
@@ -258,7 +401,8 @@ export function LumiLayout({ children }: { children: ReactNode }) {
                   )}
                 </button>
                 <span className="hidden sm:inline text-[11px] font-medium text-muted-foreground border-l border-primary/20 pl-1.5 ml-0.5">
-                  {wallet.balanceFormatted} {wallet.balance.symbol}
+                  {wallet.balance.isLoading ? "..." : wallet.balanceFormatted}{" "}
+                  {wallet.balance.symbol}
                 </span>
                 <button
                   type="button"
@@ -271,25 +415,101 @@ export function LumiLayout({ children }: { children: ReactNode }) {
                 </button>
               </div>
             ) : (
-              <button
-                type="button"
-                onClick={() => wallet.connect()}
-                disabled={wallet.isConnecting || wallet.isReconnecting}
-                className="flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-purple-600 to-indigo-600 px-3 py-1.5 text-xs font-bold text-white shadow-xs transition hover:brightness-110 active:scale-98 cursor-pointer"
-              >
-                {wallet.isConnecting || wallet.isReconnecting ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <WalletIcon walletType="metamask" className="size-3.5" />
+              <div ref={walletMenuRef} className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setWalletConnectError(null);
+                    wallet.clearError();
+                    setWalletMenuOpen((open) => !open);
+                  }}
+                  disabled={wallet.isConnecting || wallet.isReconnecting}
+                  aria-haspopup="menu"
+                  aria-expanded={walletMenuOpen}
+                  className="flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-purple-600 to-indigo-600 px-3 py-1.5 text-xs font-bold text-white shadow-xs transition hover:brightness-110 active:scale-98 disabled:cursor-wait disabled:opacity-80 cursor-pointer"
+                >
+                  {wallet.isConnecting || wallet.isReconnecting ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <WalletIcon walletType="wallet" className="size-3.5" />
+                  )}
+                  <span>
+                    {wallet.isReconnecting
+                      ? "Restoring..."
+                      : wallet.isConnecting
+                        ? "Connecting..."
+                        : "Connect"}
+                  </span>
+                  <ChevronDown
+                    className={`size-3 opacity-80 transition-transform ${walletMenuOpen ? "rotate-180" : ""}`}
+                  />
+                </button>
+
+                {walletMenuOpen && (
+                  <div
+                    role="menu"
+                    className="absolute right-0 z-50 mt-1.5 w-64 overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-lg animate-in fade-in slide-in-from-top-1 duration-150"
+                  >
+                    <div className="border-b border-border/80 bg-muted/20 px-3 py-2">
+                      <div className="flex items-center gap-2 text-xs font-bold text-foreground">
+                        <Wallet className="size-3.5 text-primary" />
+                        <span>Connect wallet</span>
+                      </div>
+                      <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+                        Choose an available EVM connector for live signing and transactions.
+                      </p>
+                    </div>
+
+                    {walletStatusError && (
+                      <div className="flex items-start gap-1.5 border-b border-destructive/20 bg-destructive/10 px-3 py-2 text-[11px] leading-snug text-destructive">
+                        <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                        <span>{walletStatusError}</span>
+                      </div>
+                    )}
+
+                    <div className="p-1.5">
+                      {wallet.connectors.length === 0 ? (
+                        <div className="rounded-lg border border-border/70 bg-muted/30 px-3 py-3 text-[11px] leading-snug text-muted-foreground">
+                          Install a browser wallet or enable Coinbase Wallet to connect.
+                        </div>
+                      ) : (
+                        wallet.connectors.map((connector, index) => (
+                          <button
+                            key={`${connector.id}-${index}`}
+                            type="button"
+                            role="menuitem"
+                            onClick={() => void handleWalletConnect(connector.id)}
+                            disabled={wallet.isConnecting}
+                            className="flex w-full items-center justify-between rounded-lg border border-transparent px-2.5 py-2 text-left text-xs transition hover:border-primary/20 hover:bg-muted/70 disabled:cursor-wait disabled:opacity-70 cursor-pointer"
+                          >
+                            <span className="flex min-w-0 items-center gap-2.5">
+                              <WalletIcon
+                                walletType={connectorWalletType(connector)}
+                                className="size-4 shrink-0"
+                              />
+                              <span className="flex min-w-0 flex-col leading-tight">
+                                <span className="truncate font-semibold text-foreground">
+                                  {connectorLabel(connector)}
+                                </span>
+                                <span className="truncate text-[10px] font-mono text-muted-foreground">
+                                  {connector.id === "injected"
+                                    ? "Installed provider"
+                                    : "External connector"}
+                                </span>
+                              </span>
+                            </span>
+                            {wallet.isConnecting ? (
+                              <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" />
+                            ) : (
+                              <ExternalLink className="size-3 shrink-0 text-muted-foreground/60" />
+                            )}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
                 )}
-                <span>
-                  {wallet.isReconnecting
-                    ? "Restoring..."
-                    : wallet.isConnecting
-                      ? "Connecting..."
-                      : "Connect"}
-                </span>
-              </button>
+              </div>
             )}
           </div>
         </div>
@@ -374,7 +594,7 @@ export function LumiLayout({ children }: { children: ReactNode }) {
               </div>
               <div>
                 <label className="text-muted-foreground mb-1 block font-medium">
-                  ETH Price ($USD)
+                  ETH Price (USD)
                 </label>
                 <input
                   type="number"
@@ -387,38 +607,18 @@ export function LumiLayout({ children }: { children: ReactNode }) {
                 <div className="flex justify-between items-center">
                   <span className="text-muted-foreground">Standard Transfer (21k gas):</span>
                   <span className="font-mono font-semibold text-foreground">
-                    $
-                    {(
-                      21000 *
-                      parseFloat(calcGasGwei || "0") *
-                      1e-9 *
-                      parseFloat(calcEthPrice || "0")
-                    ).toFixed(3)}
+                    {formatFeeUsd(21000)}
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-muted-foreground">NFT Mint (~120k gas):</span>
                   <span className="font-mono font-semibold text-foreground">
-                    $
-                    {(
-                      120000 *
-                      parseFloat(calcGasGwei || "0") *
-                      1e-9 *
-                      parseFloat(calcEthPrice || "0")
-                    ).toFixed(3)}
+                    {formatFeeUsd(120000)}
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-muted-foreground">Disperse 10 Wallets (~300k gas):</span>
-                  <span className="font-mono font-bold text-primary">
-                    $
-                    {(
-                      300000 *
-                      parseFloat(calcGasGwei || "0") *
-                      1e-9 *
-                      parseFloat(calcEthPrice || "0")
-                    ).toFixed(3)}
-                  </span>
+                  <span className="font-mono font-bold text-primary">{formatFeeUsd(300000)}</span>
                 </div>
               </div>
             </div>
@@ -512,8 +712,11 @@ export function SearchBar({
   const containerRef = useRef<HTMLDivElement>(null);
 
   const quickTags = [
-    { label: "Trending", query: "trending", icon: <Flame className="size-3 text-amber-500" /> },
-    { label: "Free Mints", query: "free mint", icon: <Zap className="size-3 text-cyan-400" /> },
+    {
+      label: "Ethereum",
+      query: "ethereum",
+      icon: <ChainIcon chainId="ethereum" className="size-3.5" />,
+    },
     { label: "Base", query: "base", icon: <ChainIcon chainId="base" className="size-3.5" /> },
     {
       label: "Polygon",
@@ -521,9 +724,9 @@ export function SearchBar({
       icon: <ChainIcon chainId="polygon" className="size-3.5" />,
     },
     {
-      label: "OpenSea",
-      query: "opensea",
-      icon: <PlatformIcon platform="opensea" className="size-3.5" />,
+      label: "Arbitrum",
+      query: "arbitrum",
+      icon: <ChainIcon chainId="arbitrum" className="size-3.5" />,
     },
     { label: "Zora", query: "zora", icon: <PlatformIcon platform="zora" className="size-3.5" /> },
   ];
@@ -655,7 +858,7 @@ export function SearchBar({
             <span>
               Matches for <strong className="text-foreground">"{query}"</strong>
             </span>
-            <span>{results.length} found</span>
+            <span>{loading ? "Searching live sources" : `${results.length} found`}</span>
           </div>
 
           {results.length > 0 ? (
@@ -742,8 +945,8 @@ export function SearchBar({
           ) : (
             !loading && (
               <div className="rounded-2xl border border-border bg-card p-6 text-center text-sm text-muted-foreground">
-                No indexed collections found for "{query}". You can also enter a direct smart
-                contract address (0x...).
+                No live collections found for "{query}". You can also enter a direct smart contract
+                address (0x...).
               </div>
             )
           )}

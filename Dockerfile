@@ -1,5 +1,5 @@
 # ==========================================================
-# Multi-Stage Production Dockerfile for Enterprise Deployment
+# Multi-Stage Production Dockerfile
 # Targets Node.js standalone HTTP server via Nitro node-server preset
 # ==========================================================
 
@@ -11,9 +11,9 @@ WORKDIR /app
 ENV PATH=/app/node_modules/.bin:$PATH
 ENV NITRO_PRESET=node-server
 
-COPY package.json package-lock.json* ./
-# Install all dependencies including devDependencies needed for building
-RUN npm install --include=dev --legacy-peer-deps
+COPY package.json package-lock.json ./
+# Install exactly the locked dependency tree, including devDependencies needed for building.
+RUN npm ci --include=dev --legacy-peer-deps
 
 COPY . .
 
@@ -57,4 +57,3 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 
 # Start the standalone Node server
 CMD ["node", ".output/server/index.mjs"]
-

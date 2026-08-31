@@ -23,9 +23,11 @@ import {
 } from "wagmi/chains";
 import { injected, coinbaseWallet } from "wagmi/connectors";
 
-// Public / Personal RPC Key Fallbacks
-const ALCHEMY_KEY = import.meta.env.VITE_ALCHEMY_API_KEY || "demo";
-const INFURA_KEY = import.meta.env.VITE_INFURA_API_KEY || "demo";
+const ALCHEMY_KEY = (import.meta.env["VITE_ALCHEMY_API_KEY"] || "").trim();
+const INFURA_KEY = (import.meta.env["VITE_INFURA_API_KEY"] || "").trim();
+
+const alchemy = (url: (key: string) => string) => (ALCHEMY_KEY ? [http(url(ALCHEMY_KEY))] : []);
+const infura = (url: (key: string) => string) => (INFURA_KEY ? [http(url(INFURA_KEY))] : []);
 
 export const config = createConfig({
   chains: [
@@ -65,47 +67,47 @@ export const config = createConfig({
   ssr: true,
   transports: {
     [mainnet.id]: fallback([
-      http(`https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`),
-      http(`https://mainnet.infura.io/v3/${INFURA_KEY}`),
+      ...alchemy((key) => `https://eth-mainnet.g.alchemy.com/v2/${key}`),
+      ...infura((key) => `https://mainnet.infura.io/v3/${key}`),
       http("https://eth.llamarpc.com"),
       http("https://rpc.ankr.com/eth"),
       http("https://ethereum-rpc.publicnode.com"),
       http(),
     ]),
     [base.id]: fallback([
-      http(`https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`),
+      ...alchemy((key) => `https://base-mainnet.g.alchemy.com/v2/${key}`),
       http("https://mainnet.base.org"),
       http("https://base.llamarpc.com"),
       http("https://base-rpc.publicnode.com"),
       http(),
     ]),
     [arbitrum.id]: fallback([
-      http(`https://arb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`),
-      http(`https://arbitrum-mainnet.infura.io/v3/${INFURA_KEY}`),
+      ...alchemy((key) => `https://arb-mainnet.g.alchemy.com/v2/${key}`),
+      ...infura((key) => `https://arbitrum-mainnet.infura.io/v3/${key}`),
       http("https://arb1.arbitrum.io/rpc"),
       http("https://arbitrum.llamarpc.com"),
       http("https://arbitrum-one-rpc.publicnode.com"),
       http(),
     ]),
     [optimism.id]: fallback([
-      http(`https://opt-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`),
-      http(`https://optimism-mainnet.infura.io/v3/${INFURA_KEY}`),
+      ...alchemy((key) => `https://opt-mainnet.g.alchemy.com/v2/${key}`),
+      ...infura((key) => `https://optimism-mainnet.infura.io/v3/${key}`),
       http("https://mainnet.optimism.io"),
       http("https://optimism.llamarpc.com"),
       http("https://optimism-rpc.publicnode.com"),
       http(),
     ]),
     [polygon.id]: fallback([
-      http(`https://polygon-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`),
-      http(`https://polygon-mainnet.infura.io/v3/${INFURA_KEY}`),
+      ...alchemy((key) => `https://polygon-mainnet.g.alchemy.com/v2/${key}`),
+      ...infura((key) => `https://polygon-mainnet.infura.io/v3/${key}`),
       http("https://polygon-rpc.com"),
       http("https://polygon.llamarpc.com"),
       http("https://polygon-bor-rpc.publicnode.com"),
       http(),
     ]),
     [blast.id]: fallback([
-      http(`https://blast-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`),
-      http(`https://blast-mainnet.infura.io/v3/${INFURA_KEY}`),
+      ...alchemy((key) => `https://blast-mainnet.g.alchemy.com/v2/${key}`),
+      ...infura((key) => `https://blast-mainnet.infura.io/v3/${key}`),
       http("https://rpc.blast.io"),
       http("https://blast.blockpi.network/v1/rpc/public"),
       http(),
@@ -117,24 +119,24 @@ export const config = createConfig({
       http(),
     ]),
     [zora.id]: fallback([
-      http(`https://zora-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`),
+      ...alchemy((key) => `https://zora-mainnet.g.alchemy.com/v2/${key}`),
       http("https://rpc.zora.energy"),
       http(),
     ]),
     [avalanche.id]: fallback([
-      http(`https://avax-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`),
-      http(`https://avalanche-mainnet.infura.io/v3/${INFURA_KEY}`),
+      ...alchemy((key) => `https://avax-mainnet.g.alchemy.com/v2/${key}`),
+      ...infura((key) => `https://avalanche-mainnet.infura.io/v3/${key}`),
       http("https://api.avax.network/ext/bc/C/rpc"),
       http("https://avalanche.public-rpc.com"),
       http(),
     ]),
     [linea.id]: fallback([
-      http(`https://linea-mainnet.infura.io/v3/${INFURA_KEY}`),
+      ...infura((key) => `https://linea-mainnet.infura.io/v3/${key}`),
       http("https://rpc.linea.build"),
       http(),
     ]),
     [scroll.id]: fallback([
-      http(`https://scroll-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`),
+      ...alchemy((key) => `https://scroll-mainnet.g.alchemy.com/v2/${key}`),
       http("https://rpc.scroll.io"),
       http(),
     ]),
@@ -147,8 +149,8 @@ export const config = createConfig({
     ]),
     [berachainTestnetbArtio.id]: fallback([http("https://artio.rpc.berachain.com"), http()]),
     [sepolia.id]: fallback([
-      http(`https://eth-sepolia.g.alchemy.com/v2/${ALCHEMY_KEY}`),
-      http(`https://sepolia.infura.io/v3/${INFURA_KEY}`),
+      ...alchemy((key) => `https://eth-sepolia.g.alchemy.com/v2/${key}`),
+      ...infura((key) => `https://sepolia.infura.io/v3/${key}`),
       http("https://rpc.sepolia.org"),
       http("https://ethereum-sepolia-rpc.publicnode.com"),
       http(),

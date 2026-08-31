@@ -196,12 +196,12 @@ function Wallets() {
                   Wallet Matrix Vault
                 </h1>
                 <span className="rounded-md bg-purple-500/10 px-2 py-0.5 font-mono text-[10px] font-bold text-purple-400 border border-purple-500/20">
-                  AES-256 ISOLATED
+                  LOCAL KEYS
                 </span>
               </div>
               <p className="text-xs text-muted-foreground">
                 Manage burner wallets, mint executors, and synchronize balances across 18 EVM chains
-                with private key backup.
+                with local private key import and export.
               </p>
             </div>
 
@@ -465,7 +465,7 @@ function Wallets() {
           {loading ? (
             <div className="flex items-center justify-center py-24 text-muted-foreground">
               <Loader2 className="size-5 animate-spin mr-2 text-primary" />
-              <span className="text-xs">Decrypting wallet matrix...</span>
+              <span className="text-xs">Loading wallet matrix...</span>
             </div>
           ) : filteredWallets.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-24 text-center px-4">
@@ -477,7 +477,7 @@ function Wallets() {
               </p>
               <p className="text-xs text-muted-foreground mt-1 max-w-sm">
                 {wallets.length === 0
-                  ? "Generate burner wallets in bulk or import your existing private keys / mnemonics."
+                  ? "Generate burner wallets in bulk or import your existing private keys."
                   : "Try adjusting your search query or switching filter mode."}
               </p>
               {wallets.length === 0 && (

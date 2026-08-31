@@ -122,7 +122,7 @@ export function ImportWalletModal({
               <textarea
                 value={rawKeys}
                 onChange={(e) => setRawKeys(e.target.value)}
-                placeholder="0x4f3edf983ac636a65a842ce7c78d5aa706d3b113bce9c46f30d7d21715b23b1d&#10;0x6cbed15c793ce57650b9877cf5bab067843098a63c52fa1bcb09e864a74e9aee"
+                placeholder="0x... private key&#10;0x... private key"
                 rows={5}
                 className="w-full font-mono text-xs rounded-lg border border-border bg-background p-2.5 text-foreground placeholder:text-muted-foreground/60 focus:border-primary focus:outline-none"
               />

@@ -13,6 +13,7 @@ import {
   useWalletClient,
 } from "wagmi";
 import { type Address, type Hash, type Abi, parseEther, formatEther } from "viem";
+import { config } from "@/lib/wagmiConfig";
 import { SUPPORTED_CHAINS } from "@/lib/rpc";
 
 export interface ConnectedWalletState {
@@ -115,7 +116,7 @@ export interface UseWalletReturn {
 }
 
 function detectWalletBrand(connector?: ReturnType<typeof useAccount>["connector"]): string {
-  if (!connector) return "metamask";
+  if (!connector) return "wallet";
   const name = (connector.name || "").toLowerCase();
   const id = (connector.id || "").toLowerCase();
 
@@ -127,7 +128,24 @@ function detectWalletBrand(connector?: ReturnType<typeof useAccount>["connector"
   if (name.includes("metamask") || id.includes("metamask") || id.includes("io.metamask"))
     return "metamask";
 
-  return "metamask";
+  return "wallet";
+}
+
+type ConfiguredChainId = (typeof config)["chains"][number]["id"];
+
+function toConfiguredChainId(chainId: number | undefined): ConfiguredChainId | undefined {
+  if (chainId === undefined) return undefined;
+  return config.chains.some((chain) => chain.id === chainId)
+    ? (chainId as ConfiguredChainId)
+    : undefined;
+}
+
+function requireConfiguredChainId(chainId: number): ConfiguredChainId {
+  const configuredChainId = toConfiguredChainId(chainId);
+  if (configuredChainId === undefined) {
+    throw new Error(`Unsupported chain id: ${chainId}`);
+  }
+  return configuredChainId;
 }
 
 export function useWallet(): UseWalletReturn {
@@ -144,7 +162,7 @@ export function useWallet(): UseWalletReturn {
 
   const balanceQuery = useBalance({
     address: account.address,
-    chainId: account.chainId as any,
+    chainId: toConfiguredChainId(account.chainId),
   });
 
   const { signMessageAsync } = useSignMessage();
@@ -178,9 +196,11 @@ export function useWallet(): UseWalletReturn {
           throw new Error("No Web3 wallet connector available");
         }
 
+        const chainId = targetChainId ? requireConfiguredChainId(targetChainId) : undefined;
+
         await connectAsync({
           connector: targetConnector,
-          chainId: targetChainId as any,
+          ...(chainId !== undefined ? { chainId } : {}),
         });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : "Failed to connect wallet";
@@ -205,7 +225,7 @@ export function useWallet(): UseWalletReturn {
     async (targetChainId: number) => {
       setCustomError(null);
       try {
-        await switchChainAsync({ chainId: targetChainId as any });
+        await switchChainAsync({ chainId: requireConfiguredChainId(targetChainId) });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : "Failed to switch chain";
         console.error("useWallet switchChain error:", err);
@@ -307,16 +327,19 @@ Issued At: ${issuedAt}`;
       const value =
         typeof params.value === "string" ? parseEther(params.value) : (params.value ?? 0n);
 
-      const txParams: any = {
+      const chainId =
+        params.chainId !== undefined ? requireConfiguredChainId(params.chainId) : undefined;
+      const txParams = {
         to: params.to,
         value,
-      };
-      if (params.data !== undefined) txParams.data = params.data;
-      if (params.gas !== undefined) txParams.gas = params.gas;
-      if (params.maxFeePerGas !== undefined) txParams.maxFeePerGas = params.maxFeePerGas;
-      if (params.maxPriorityFeePerGas !== undefined)
-        txParams.maxPriorityFeePerGas = params.maxPriorityFeePerGas;
-      if (params.chainId !== undefined) txParams.chainId = params.chainId;
+        ...(params.data !== undefined ? { data: params.data } : {}),
+        ...(params.gas !== undefined ? { gas: params.gas } : {}),
+        ...(params.maxFeePerGas !== undefined ? { maxFeePerGas: params.maxFeePerGas } : {}),
+        ...(params.maxPriorityFeePerGas !== undefined
+          ? { maxPriorityFeePerGas: params.maxPriorityFeePerGas }
+          : {}),
+        ...(chainId !== undefined ? { chainId } : {}),
+      } as unknown as Parameters<typeof sendTransactionAsync>[0];
 
       try {
         return await sendTransactionAsync(txParams);
@@ -336,7 +359,7 @@ Issued At: ${issuedAt}`;
       valueWei?: bigint;
       chainId?: number;
     }): Promise<Hash> => {
-      const txParams: any = {
+      const txParams: Parameters<typeof sendTransaction>[0] = {
         to: params.to,
         value: params.valueWei || 0n,
       };
@@ -362,14 +385,16 @@ Issued At: ${issuedAt}`;
     }): Promise<Hash> => {
       setCustomError(null);
       try {
-        const writeParams: any = {
+        const chainId =
+          params.chainId !== undefined ? requireConfiguredChainId(params.chainId) : undefined;
+        const writeParams = {
           address: params.address,
           abi: params.abi,
           functionName: params.functionName,
-        };
-        if (params.args !== undefined) writeParams.args = params.args;
-        if (params.value !== undefined) writeParams.value = params.value;
-        if (params.chainId !== undefined) writeParams.chainId = params.chainId;
+          ...(params.args !== undefined ? { args: params.args } : {}),
+          ...(params.value !== undefined ? { value: params.value } : {}),
+          ...(chainId !== undefined ? { chainId } : {}),
+        } as unknown as Parameters<typeof writeContractAsync>[0];
 
         return await writeContractAsync(writeParams);
       } catch (err: unknown) {
@@ -421,7 +446,7 @@ Issued At: ${issuedAt}`;
     isMounted: mounted,
     status: mounted ? account.status : "disconnected",
     connector: mounted ? account.connector : undefined,
-    walletType: mounted ? walletType : "metamask",
+    walletType: mounted ? walletType : "wallet",
     chainName: mounted ? chainName : "Ethereum",
     balance: mounted
       ? balance

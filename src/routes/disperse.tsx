@@ -84,23 +84,47 @@ function Disperse() {
   const [isExecuting, setIsExecuting] = useState(false);
   const [execResult, setExecResult] = useState<DisperseResult | null>(null);
   const [execError, setExecError] = useState<string | null>(null);
+  const [planError, setPlanError] = useState<string | null>(null);
   const [senderBalance, setSenderBalance] = useState<string>("0");
+  const [ethUsdPrice, setEthUsdPrice] = useState<number | null>(null);
 
   const currentChain: ChainInfo = useMemo(() => getChainById(selectedChainId), [selectedChainId]);
 
   // Selected Sender Object
   const selectedSender = useMemo(() => {
     if (selectedSenderId === "web3_wallet") {
+      if (!web3Wallet.address) return null;
       return {
         id: "web3_wallet",
         name: "Connected Web3 Wallet",
-        address:
-          (web3Wallet.address as `0x${string}`) || "0x0000000000000000000000000000000000000000",
+        address: web3Wallet.address as `0x${string}`,
         privateKey: undefined,
       };
     }
     return wallets.find((w) => w.id === selectedSenderId) || wallets[0] || null;
   }, [selectedSenderId, wallets, web3Wallet.address]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function fetchEthPrice() {
+      try {
+        const res = await fetch("/api/market/eth-usd");
+        if (!res.ok) return;
+        const data = (await res.json()) as { priceUsd?: number };
+        if (isMounted && typeof data.priceUsd === "number") {
+          setEthUsdPrice(data.priceUsd);
+        }
+      } catch (err) {
+        console.warn("Failed to fetch ETH/USD price:", err);
+      }
+    }
+
+    fetchEthPrice();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   // Recipient List
   const recipientAddresses: `0x${string}`[] = useMemo(() => {
@@ -199,9 +223,11 @@ function Disperse() {
     setAmountPerWallet("0.005");
     setExternalAddresses([]);
     setExternalAddressInput("");
+    setPlanError(null);
   };
 
   const handleOpenPlan = async () => {
+    setPlanError(null);
     if (!selectedSender) {
       alert("Please select a sender wallet from your vault or connect Web3.");
       return;
@@ -218,31 +244,36 @@ function Disperse() {
     }
 
     let plan: DispersePlan;
-    if (disperseMode === "random") {
-      const minVal = perWalletVal * 0.8;
-      plan = await planDisperseEther({
-        senderAddress: selectedSender.address as `0x${string}`,
-        recipientAddresses,
-        amountPerWalletEth: minVal.toFixed(5),
-        chain: currentChain,
-      });
-    } else if (disperseMode === "split") {
-      const totalAmount = parseFloat(amountPerWallet) || 0;
-      const splitAmount =
-        recipientAddresses.length > 0 ? totalAmount / recipientAddresses.length : 0;
-      plan = await planDisperseEther({
-        senderAddress: selectedSender.address as `0x${string}`,
-        recipientAddresses,
-        amountPerWalletEth: splitAmount.toFixed(5),
-        chain: currentChain,
-      });
-    } else {
-      plan = await planDisperseEther({
-        senderAddress: selectedSender.address as `0x${string}`,
-        recipientAddresses,
-        amountPerWalletEth: amountPerWallet,
-        chain: currentChain,
-      });
+    try {
+      if (disperseMode === "random") {
+        const minVal = perWalletVal * 0.8;
+        plan = await planDisperseEther({
+          senderAddress: selectedSender.address as `0x${string}`,
+          recipientAddresses,
+          amountPerWalletEth: minVal.toFixed(5),
+          chain: currentChain,
+        });
+      } else if (disperseMode === "split") {
+        const totalAmount = parseFloat(amountPerWallet) || 0;
+        const splitAmount =
+          recipientAddresses.length > 0 ? totalAmount / recipientAddresses.length : 0;
+        plan = await planDisperseEther({
+          senderAddress: selectedSender.address as `0x${string}`,
+          recipientAddresses,
+          amountPerWalletEth: splitAmount.toFixed(5),
+          chain: currentChain,
+        });
+      } else {
+        plan = await planDisperseEther({
+          senderAddress: selectedSender.address as `0x${string}`,
+          recipientAddresses,
+          amountPerWalletEth: amountPerWallet,
+          chain: currentChain,
+        });
+      }
+    } catch (err: unknown) {
+      setPlanError(err instanceof Error ? err.message : "Failed to build disperse plan");
+      return;
     }
 
     setCurrentPlan(plan);
@@ -325,6 +356,10 @@ function Disperse() {
   };
 
   const quickPresets = ["0.001", "0.005", "0.01", "0.05", "0.1"];
+  const estimatedBatchAmount =
+    (parseFloat(amountPerWallet) || 0) * (disperseMode === "split" ? 1 : recipientAddresses.length);
+  const estimatedUsd =
+    currentChain.symbol === "ETH" && ethUsdPrice ? estimatedBatchAmount * ethUsdPrice : null;
 
   return (
     <UmiLayout>
@@ -661,20 +696,12 @@ function Disperse() {
               <div className="flex flex-col">
                 <span className="text-xs text-muted-foreground">Estimated Total Batch Amount:</span>
                 <span className="text-base font-extrabold text-foreground font-mono">
-                  {(
-                    (parseFloat(amountPerWallet) || 0) *
-                    (disperseMode === "split" ? 1 : recipientAddresses.length)
-                  ).toFixed(4)}{" "}
-                  {currentChain.symbol}{" "}
-                  <span className="text-xs font-normal text-muted-foreground font-sans">
-                    (~$
-                    {(
-                      (parseFloat(amountPerWallet) || 0) *
-                      (disperseMode === "split" ? 1 : recipientAddresses.length) *
-                      3180
-                    ).toFixed(2)}
-                    )
-                  </span>
+                  {estimatedBatchAmount.toFixed(4)} {currentChain.symbol}{" "}
+                  {estimatedUsd !== null && (
+                    <span className="text-xs font-normal text-muted-foreground font-sans">
+                      (~${estimatedUsd.toFixed(2)})
+                    </span>
+                  )}
                 </span>
               </div>
 
@@ -688,6 +715,13 @@ function Disperse() {
                 <ArrowRight className="size-4" />
               </button>
             </div>
+
+            {planError && (
+              <div className="rounded-xl border border-destructive/25 bg-destructive/10 p-3 text-xs text-destructive flex items-start gap-2">
+                <AlertCircle className="size-4 shrink-0 mt-0.5" />
+                <span>{planError}</span>
+              </div>
+            )}
           </div>
         </div>
       </div>

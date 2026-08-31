@@ -1,5 +1,6 @@
 import "./lib/error-capture";
 
+import { EVM_CHAINS } from "./lib/chains";
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
 
@@ -60,78 +61,127 @@ interface OpenSeaApiResponse {
   collections?: OpenSeaCollectionRaw[];
 }
 
-const SERVER_CHAINS = [
-  {
-    id: 1,
-    name: "Ethereum",
-    symbol: "ETH",
-    rpc: "https://eth.llamarpc.com",
-    explorer: "https://etherscan.io",
+interface ServerChain {
+  id: number;
+  slug: string;
+  name: string;
+  symbol: string;
+  rpc: string;
+  explorer: string;
+}
+
+const RPC_ENV_BY_CHAIN_ID: Record<number, string[]> = {
+  1: ["ETH_RPC_URL", "ETHEREUM_RPC_URL"],
+  8453: ["BASE_RPC_URL"],
+  42161: ["ARB_RPC_URL", "ARBITRUM_RPC_URL"],
+  10: ["OPTIMISM_RPC_URL", "OP_RPC_URL"],
+  137: ["POLYGON_RPC_URL"],
+  81457: ["BLAST_RPC_URL"],
+  56: ["BSC_RPC_URL", "BNB_RPC_URL"],
+  7777777: ["ZORA_RPC_URL"],
+  43114: ["AVALANCHE_RPC_URL", "AVAX_RPC_URL"],
+  59144: ["LINEA_RPC_URL"],
+  534352: ["SCROLL_RPC_URL"],
+  5000: ["MANTLE_RPC_URL"],
+  34443: ["MODE_RPC_URL"],
+  80094: ["BERACHAIN_RPC_URL"],
+  33139: ["APECHAIN_RPC_URL"],
+  1329: ["SEI_RPC_URL"],
+  57073: ["INK_RPC_URL"],
+  10143: ["MONAD_RPC_URL"],
+  11155111: ["SEPOLIA_RPC_URL"],
+};
+
+function getEnv(name: string): string {
+  return typeof process !== "undefined" ? (process.env[name] || "").trim() : "";
+}
+
+function getRpcOverride(chainId: number): string | undefined {
+  for (const key of RPC_ENV_BY_CHAIN_ID[chainId] ?? []) {
+    const value = getEnv(key);
+    if (value) return value;
+  }
+  return undefined;
+}
+
+const SERVER_CHAINS: ServerChain[] = EVM_CHAINS.map((chain) => {
+  const rpc = getRpcOverride(chain.chainId) || chain.rpcUrls[0];
+  if (!rpc) return null;
+  return {
+    id: chain.chainId,
+    slug: chain.id,
+    name: chain.name,
+    symbol: chain.symbol,
+    rpc,
+    explorer: chain.blockExplorer,
+  };
+}).filter((chain): chain is ServerChain => chain !== null);
+
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+function isEvmAddress(value: string | undefined): value is `0x${string}` {
+  return !!value && /^0x[a-fA-F0-9]{40}$/.test(value) && value.toLowerCase() !== ZERO_ADDRESS;
+}
+
+function normalizeChainSlug(value: string | undefined): string {
+  const normalized = (value || "ethereum").trim().toLowerCase().replace(/\s+/g, "-");
+  const aliases: Record<string, string> = {
+    eth: "ethereum",
+    mainnet: "ethereum",
+    matic: "polygon",
+    "arbitrum-one": "arbitrum",
+    op: "optimism",
+    bnb: "bsc",
+    "bnb-chain": "bsc",
+    "bnb-smart-chain": "bsc",
+    binance: "bsc",
+    avax: "avalanche",
+    monadtestnet: "monad",
+  };
+  return aliases[normalized] || normalized;
+}
+
+function firstUsableContract(contracts: OpenSeaCollectionRaw["contracts"], fallbackChain: string) {
+  const contract = contracts?.find((item) => isEvmAddress(item.address));
+  if (!contract || !contract.address) return null;
+  return {
+    address: contract.address,
+    chain: normalizeChainSlug(contract.chain || fallbackChain),
+  };
+}
+
+function mapOpenSeaCollection(
+  item: {
+    collection?: string;
+    name?: string;
+    total_supply?: number;
+    image_url?: string;
+    opensea_url?: string;
+    contracts?: OpenSeaCollectionRaw["contracts"];
+    description?: string;
+    banner_image_url?: string;
   },
-  {
-    id: 8453,
-    name: "Base",
-    symbol: "ETH",
-    rpc: "https://mainnet.base.org",
-    explorer: "https://basescan.org",
-  },
-  {
-    id: 42161,
-    name: "Arbitrum One",
-    symbol: "ETH",
-    rpc: "https://arb1.arbitrum.io/rpc",
-    explorer: "https://arbiscan.io",
-  },
-  {
-    id: 137,
-    name: "Polygon",
-    symbol: "POL",
-    rpc: "https://polygon-rpc.com",
-    explorer: "https://polygonscan.com",
-  },
-  {
-    id: 81457,
-    name: "Blast",
-    symbol: "ETH",
-    rpc: "https://rpc.blast.io",
-    explorer: "https://blastscan.io",
-  },
-  {
-    id: 10,
-    name: "Optimism",
-    symbol: "ETH",
-    rpc: "https://mainnet.optimism.io",
-    explorer: "https://optimistic.etherscan.io",
-  },
-  {
-    id: 56,
-    name: "BNB Smart Chain",
-    symbol: "BNB",
-    rpc: "https://binance.llamarpc.com",
-    explorer: "https://bscscan.com",
-  },
-  {
-    id: 7777777,
-    name: "Zora",
-    symbol: "ETH",
-    rpc: "https://rpc.zora.energy",
-    explorer: "https://zorascan.xyz",
-  },
-  {
-    id: 80094,
-    name: "Berachain",
-    symbol: "BERA",
-    rpc: "https://rpc.berachain.com",
-    explorer: "https://berascan.com",
-  },
-  {
-    id: 11155111,
-    name: "Sepolia Testnet",
-    symbol: "SepoliaETH",
-    rpc: "https://rpc.sepolia.org",
-    explorer: "https://sepolia.etherscan.io",
-  },
-];
+  fallbackSlug: string,
+  fallbackChain: string,
+) {
+  const contract = firstUsableContract(item.contracts, fallbackChain);
+  if (!contract) return null;
+
+  const slug = item.collection || fallbackSlug;
+  return {
+    collection: slug,
+    name: item.name || slug,
+    contractAddress: contract.address,
+    chain: contract.chain,
+    itemCount: item.total_supply || 0,
+    slug,
+    imageUrl: item.image_url || item.banner_image_url,
+    openseaUrl: item.opensea_url || `https://opensea.io/collection/${slug}`,
+    description: item.description,
+    verified: true,
+    isRealApi: true,
+  };
+}
 
 function jsonResponse(data: unknown, status = 200, cacheSeconds = 0): Response {
   const headers: Record<string, string> = {
@@ -184,10 +234,10 @@ export default {
         version: "2.5.0",
         chainsSupported: SERVER_CHAINS.length,
         services: {
-          openSeaProxy: "operational",
+          openSeaProxy: getEnv("OPENSEA_API_KEY") ? "configured" : "live-with-public-rate-limits",
           rpcGateway: "operational",
-          mintQueue: "operational",
-          vaultEncryption: "operational",
+          mintQueue: "in-process",
+          vaultEncryption: "available",
         },
       });
     }
@@ -222,7 +272,7 @@ export default {
           });
           if (rpcRes.ok) {
             const data = (await rpcRes.json()) as { result?: string };
-            if (data.result) {
+            if (data.result && data.result !== "0x") {
               const wei = BigInt(data.result);
               const gwei = Number(wei) / 1e9;
               return {
@@ -248,13 +298,45 @@ export default {
           chainId: chain ? chain.id : 1,
           chainName: chain ? chain.name : "Ethereum",
           symbol: chain ? chain.symbol : "ETH",
-          gasPriceGwei: 15.0,
-          gasPriceWei: "0x37e11d600",
-          status: "fallback",
+          gasPriceGwei: null,
+          gasPriceWei: null,
+          status: "unavailable",
+          error: res.reason instanceof Error ? res.reason.message : "RPC gas query failed",
         };
       });
 
       return jsonResponse({ gas: results, timestamp: Date.now() }, 200, 10);
+    }
+
+    if (url.pathname === "/api/market/eth-usd") {
+      try {
+        const priceRes = await fetch("https://api.coinbase.com/v2/prices/ETH-USD/spot", {
+          headers: { Accept: "application/json" },
+        });
+        if (!priceRes.ok) {
+          return jsonResponse({ error: `Price provider returned ${priceRes.status}` }, 502);
+        }
+
+        const data = (await priceRes.json()) as { data?: { amount?: string; currency?: string } };
+        const priceUsd = Number(data.data?.amount);
+        if (!Number.isFinite(priceUsd) || priceUsd <= 0) {
+          return jsonResponse({ error: "Price provider returned an invalid ETH/USD quote" }, 502);
+        }
+
+        return jsonResponse(
+          {
+            pair: "ETH-USD",
+            priceUsd,
+            source: "coinbase",
+            timestamp: Date.now(),
+          },
+          200,
+          30,
+        );
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "Price fetch failed";
+        return jsonResponse({ error: message }, 502);
+      }
     }
 
     // ==========================================
@@ -318,7 +400,7 @@ export default {
       if (!slug) {
         return jsonResponse({ error: "Slug required" }, 400);
       }
-      const apiKey = process.env["OPENSEA_API_KEY"] || "";
+      const apiKey = getEnv("OPENSEA_API_KEY");
       const headers: Record<string, string> = {
         Accept: "application/json",
       };
@@ -350,8 +432,8 @@ export default {
       const q = url.searchParams.get("q") || "";
       const slug = url.searchParams.get("slug") || "";
       const address = url.searchParams.get("address") || "";
-      const chain = url.searchParams.get("chain") || "ethereum";
-      const apiKey = process.env["OPENSEA_API_KEY"] || "";
+      const chain = normalizeChainSlug(url.searchParams.get("chain") || "ethereum");
+      const apiKey = getEnv("OPENSEA_API_KEY");
 
       const headers: Record<string, string> = {
         Accept: "application/json",
@@ -371,35 +453,20 @@ export default {
             { headers },
           );
           if (singleRes.ok) {
-            const data = (await singleRes.json()) as {
-              collection?: string;
-              name?: string;
-              description?: string;
-              image_url?: string;
-              banner_image_url?: string;
-              total_supply?: number;
-              opensea_url?: string;
-              contracts?: Array<{ address: string; chain: string }>;
-            };
+            const data = (await singleRes.json()) as Parameters<typeof mapOpenSeaCollection>[0];
+            const item = mapOpenSeaCollection(data, targetSlug, chain);
+            if (item) {
+              return jsonResponse({ collections: [item], collection: item }, 200, 60);
+            }
 
-            const contractAddr =
-              data.contracts?.[0]?.address || "0x0000000000000000000000000000000000000000";
-            const item = {
-              collection: data.collection || targetSlug,
-              name: data.name || targetSlug,
-              contractAddress: contractAddr,
-              chain: data.contracts?.[0]?.chain || chain,
-              itemCount: data.total_supply || 0,
-              slug: data.collection || targetSlug,
-              imageUrl: data.image_url || data.banner_image_url,
-              openseaUrl:
-                data.opensea_url ||
-                `https://opensea.io/collection/${data.collection || targetSlug}`,
-              description: data.description,
-              verified: true,
-              isRealApi: true,
-            };
-            return jsonResponse({ collections: [item], collection: item }, 200, 60);
+            return jsonResponse(
+              {
+                collections: [],
+                error: "OpenSea did not return a usable EVM contract for this collection",
+              },
+              200,
+              60,
+            );
           }
         } catch (err: unknown) {
           console.warn("OpenSea slug fetch failed:", err);
@@ -407,7 +474,7 @@ export default {
       }
 
       // 2. Fetch by contract address
-      const targetAddress = address || (q.startsWith("0x") && q.length === 42 ? q : "");
+      const targetAddress = isEvmAddress(address) ? address : isEvmAddress(q) ? q : "";
       if (targetAddress) {
         try {
           const contractRes = await fetch(
@@ -422,26 +489,29 @@ export default {
               name?: string;
             };
             if (data.collection) {
-              // Fetch full collection details for this contract
               const colRes = await fetch(
                 `https://api.opensea.io/api/v2/collections/${encodeURIComponent(data.collection)}`,
                 { headers },
               );
               if (colRes.ok) {
-                const colData = await colRes.json();
-                const item = {
-                  collection: colData.collection || data.collection,
-                  name: colData.name || data.name || "NFT Collection",
-                  contractAddress: targetAddress,
-                  chain: data.chain || chain,
-                  itemCount: colData.total_supply || 0,
-                  slug: colData.collection || data.collection,
-                  imageUrl: colData.image_url || colData.banner_image_url,
-                  openseaUrl:
-                    colData.opensea_url || `https://opensea.io/collection/${data.collection}`,
-                  isRealApi: true,
-                };
-                return jsonResponse({ collections: [item], collection: item }, 200, 60);
+                const colData = (await colRes.json()) as Parameters<typeof mapOpenSeaCollection>[0];
+                const item =
+                  mapOpenSeaCollection(
+                    {
+                      ...colData,
+                      contracts: [
+                        {
+                          address: targetAddress,
+                          chain: data.chain || chain,
+                        },
+                      ],
+                    },
+                    data.collection,
+                    chain,
+                  ) || null;
+                if (item) {
+                  return jsonResponse({ collections: [item], collection: item }, 200, 60);
+                }
               }
             }
           }
@@ -468,23 +538,13 @@ export default {
                 c.collection.toLowerCase().includes(q.toLowerCase())
               );
             })
-            .map((item: OpenSeaCollectionRaw) => ({
-              collection: item.collection,
-              name: item.name || item.collection,
-              contractAddress:
-                item.contracts?.[0]?.address || "0x0000000000000000000000000000000000000000",
-              chain: item.contracts?.[0]?.chain || chain,
-              itemCount: item.total_supply || 0,
-              slug: item.collection,
-              imageUrl: item.image_url,
-              openseaUrl: item.opensea_url || `https://opensea.io/collection/${item.collection}`,
-              isRealApi: true,
-            }));
+            .map((item: OpenSeaCollectionRaw) => mapOpenSeaCollection(item, item.collection, chain))
+            .filter((item): item is NonNullable<typeof item> => item !== null);
 
           return jsonResponse({ collections }, 200, 60);
         }
       } catch (err: unknown) {
-        console.warn("OpenSea search fallback failed:", err);
+        console.warn("OpenSea search failed:", err);
       }
 
       return jsonResponse({ collections: [] }, 200);
