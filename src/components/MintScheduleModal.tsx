@@ -676,11 +676,7 @@ export function MintScheduleModal({
                   const isEnded = isStageEnded(stage);
                   const isLive = countdown === "Live Now";
                   const eligibleCount =
-                    wallets.length > 0
-                      ? stage.kind === "public"
-                        ? wallets.length
-                        : Math.min(1, wallets.length)
-                      : 0;
+                    wallets.length > 0 ? (stage.kind === "public" ? wallets.length : 0) : 0;
 
                   if (editingStageId === stage.id) {
                     return (

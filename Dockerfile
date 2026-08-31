@@ -17,6 +17,13 @@ RUN npm install --include=dev --legacy-peer-deps
 
 COPY . .
 
+# Accept client-side build arguments for Vite
+ARG VITE_ALCHEMY_API_KEY
+ENV VITE_ALCHEMY_API_KEY=$VITE_ALCHEMY_API_KEY
+
+ARG VITE_INFURA_API_KEY
+ENV VITE_INFURA_API_KEY=$VITE_INFURA_API_KEY
+
 # Build production bundles with NODE_ENV=production
 ENV NODE_ENV=production
 RUN npm run build
